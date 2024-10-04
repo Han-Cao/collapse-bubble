@@ -93,7 +93,7 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
             break
         
         finish_var = []
-        merge_id = []
+        dup_id = []
         # TODO: for conflicting variants, should we only keep the first one and save dropped varaints to INFO/DROP_ID?
         # drop_id = []
         # pairwise genotype merging
@@ -131,14 +131,14 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
                 sample.phased = True
             
             finish_var.append(other_var)
-            merge_id.append(other_var.id)
+            dup_id.append(other_var.id)
             counter.merge += 1
             
         # update list and results
         remain_var_lst = [x for x in remain_var_lst if x not in finish_var]
         merge_var = update_ac(merge_var)
-        if len(merge_id) > 0:
-            merge_var.info['MERGE_ID'] = ":".join(merge_id)
+        if len(dup_id) > 0:
+            merge_var.info['DUP_ID'] = ":".join(dup_id)
         # if len(drop_id) > 0:
         #     merge_var.info['DROP_ID'] = ":".join(drop_id)
         res_lst.append(merge_var)
@@ -175,7 +175,7 @@ def write_vcf(outvcf: pysam.VariantFile, working_var: dict, prev_var: pysam.Vari
 def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
     """ Add required headers """
     
-    header.add_line('##INFO=<ID=MERGE_ID,Number=A,Type=String,Description="Colon-separated duplicated variants merged into this variant">')
+    header.add_line('##INFO=<ID=DUP_ID,Number=A,Type=String,Description="Colon-separated duplicated variants merged into this variant">')
     # header.add_line('##INFO=<ID=DROP_ID,Number=A,Type=String,Description="Colon-separated duplicated varinats dropped due to haplotype conflict">')
 
     return header
