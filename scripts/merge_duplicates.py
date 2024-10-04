@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Merge duplicated variants in phased VCF
-# Last update: 03-Oct-2024
+# Last update: 04-Oct-2024
 # Author: Han Cao
 
 import argparse
@@ -36,11 +36,14 @@ def merge_two_hap(hap1: int, hap2: int) -> int:
     return hap_sum
 
 
-def check_missing_conflict(hap1: int, hap2: int) -> bool:
+def check_missing_conflict(gt1: tuple, gt2: tuple) -> bool:
     """ Check if two haplotypes are co-missing """
-    
-    return (hap1 is None) ^ (hap2 is None)
 
+    for hap1, hap2 in zip(gt1, gt2):
+        if (hap1 is None) ^ (hap2 is None):
+            return True
+    
+    return False
 
 def merge_two_gt(gt1: tuple, gt2: tuple) -> tuple:
     """ Merge two genotypes """
@@ -103,7 +106,10 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
                 gt1 = merge_var.samples[i]['GT']
                 gt2 = other_var.samples[i]['GT']
                 new_gt = merge_two_gt(gt1, gt2)
-                flag_conflict_missing = check_missing_conflict(gt1, gt2)
+
+                # check conflicts
+                if not flag_conflict_missing:
+                    flag_conflict_missing = check_missing_conflict(gt1, gt2)
                 # -1 indicate haplotype conflict, don't merge
                 if -1 in new_gt:
                     flag_conflict_hap = True
