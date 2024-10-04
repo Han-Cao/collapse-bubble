@@ -34,3 +34,12 @@ chr1    10040    >123>456    >123>456.COMPLEX.1_2   >123>456.COMPLEX.1_1
 Postprocess:
 - sort VCF: `bcftools sort merged.vcf.gz`
 - merge duplicated variants: `scripts/merge_duplicates.py`
+
+
+## Dependency
+```
+truvari
+pysam
+pandas
+numpy
+```
