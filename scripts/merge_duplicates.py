@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Merge duplicated variants in phased VCF
-# Last update: 04-Oct-2024
+# Last update: 19-Oct-2024
 # Author: Han Cao
 
 import argparse
@@ -79,8 +79,8 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
     return variant
 
 
-def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
-    """ Merge genotypes of list of varaints, return merged variant or the first one (haplotype conflict) """
+def merge_genotypes(var_lst: list, counter: VariantCounter, keep: str, missing: str) -> list:
+    """ Merge genotypes of list of varaints, return merged variant """
 
     res_lst = []
     remain_var_lst = var_lst.copy()
@@ -94,8 +94,9 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
         
         finish_var = []
         dup_id = []
-        # TODO: for conflicting variants, should we only keep the first one and save dropped varaints to INFO/DROP_ID?
-        # drop_id = []
+
+        if keep == 'first':
+            drop_id = []
         # pairwise genotype merging
         for other_var in remain_var_lst:
             flag_conflict_hap = False
@@ -117,13 +118,20 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
                 new_gt_lst.append(new_gt)
             if flag_conflict_hap:
                 counter.conflict_hap += 1
-                # drop_id.append(other_var.id)
+                if keep == 'first':
+                    drop_id.append(other_var.id)
                 continue
-            # TODO: we just report missing conflicts, should we also avoid merging?
+
             if flag_conflict_missing:
-                logger = logging.getLogger(__name__)
-                logger.warning(f'missing genotype conflict at {merge_var.chrom}:{merge_var.pos}: {merge_var.id} and {other_var.id}')
                 counter.conflict_missing += 1
+                if missing == 'warn':
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f'missing genotype conflict at {merge_var.chrom}:{merge_var.pos}: {merge_var.id} and {other_var.id}')
+                elif missing == 'conflict':
+                    counter.conflict_hap += 1
+                    if keep == 'first':
+                        drop_id.append(other_var.id)
+                    continue
             
             # update merged genotypes
             for sample, new_gt in zip(merge_var.samples.values(), new_gt_lst):
@@ -139,16 +147,20 @@ def merge_genotypes(var_lst: list, counter: VariantCounter) -> list:
         merge_var = update_ac(merge_var)
         if len(dup_id) > 0:
             merge_var.info['DUP_ID'] = ":".join(dup_id)
-        # if len(drop_id) > 0:
-        #     merge_var.info['DROP_ID'] = ":".join(drop_id)
+        if keep == 'first' and len(drop_id) > 0:
+            merge_var.info['DROP_ID'] = ":".join(drop_id)
         res_lst.append(merge_var)
 
-    # update AC, AN, AF and return
+        # if only output the first one, no need to loop
+        if keep == 'first':
+            break
+
     return res_lst
             
 
-def write_vcf(outvcf: pysam.VariantFile, working_var: dict, prev_var: pysam.VariantRecord, counter: VariantCounter) -> None:
-    """ Merge duplicated records and write to output VCF, return number of output variants """
+def write_vcf(outvcf: pysam.VariantFile, working_var: dict, prev_var: pysam.VariantRecord, 
+              counter: VariantCounter, keep: str, missing: str) -> None:
+    """ Merge duplicated records and write to output VCF """
 
     # only 1 variant at the previous position
     if len(working_var) == 0:
@@ -161,7 +173,7 @@ def write_vcf(outvcf: pysam.VariantFile, working_var: dict, prev_var: pysam.Vari
     for _, var_lst in working_var.items():
         if len(var_lst) > 1:
             # merge genotypes SVs
-            merge_var_lst = merge_genotypes(var_lst, counter)
+            merge_var_lst = merge_genotypes(var_lst, counter, keep, missing)
             out_lst += merge_var_lst
         else:
             out_lst.append(var_lst[0])
@@ -176,7 +188,7 @@ def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
     """ Add required headers """
     
     header.add_line('##INFO=<ID=DUP_ID,Number=A,Type=String,Description="Colon-separated duplicated variants merged into this variant">')
-    # header.add_line('##INFO=<ID=DROP_ID,Number=A,Type=String,Description="Colon-separated duplicated varinats dropped due to haplotype conflict">')
+    header.add_line('##INFO=<ID=DROP_ID,Number=A,Type=String,Description="Colon-separated duplicated varinats dropped due to haplotype conflict">')
 
     return header
 
@@ -192,10 +204,16 @@ def main(args: argparse.Namespace):
     invcf = pysam.VariantFile(args.invcf, 'rb')
     outvcf = pysam.VariantFile(args.outvcf, 'w', header=add_header(invcf.header))
     prev_var = None
-    working_var = defaultdict(list) # (ref, alt) -> list of variants
     counter = VariantCounter()
+    # (ref, alt) -> list of variants
+    # this store variants (if more than 1) at the position of the previous variant
+    working_var = defaultdict(list)
+
 
     logger.info(f'Merge duplicated variants from: {args.invcf}')
+    # to check duplicates, we always write variants after reading its next one
+    # if cur_var.pos = prev_var.pos, save them to working_var
+    # if cur_var.pos > prev_var.pos, write all variants in prev_var.pos
     for cur_var in invcf.fetch():
         counter.input += 1
         # get the first variant
@@ -205,7 +223,7 @@ def main(args: argparse.Namespace):
 
         # process all variants at the previous position
         if cur_var.pos > prev_var.pos:
-            write_vcf(outvcf, working_var, prev_var, counter)
+            write_vcf(outvcf, working_var, prev_var, counter, args.keep, args.missing)
             working_var = defaultdict(list)
         # store variants at the same position
         elif cur_var.pos == prev_var.pos:
@@ -216,7 +234,7 @@ def main(args: argparse.Namespace):
         else:
             # end of current chromosome, write all variants on the previous chromosome
             if prev_var.chrom != cur_var.chrom:
-                write_vcf(outvcf, working_var, prev_var, counter)
+                write_vcf(outvcf, working_var, prev_var, counter, args.keep, args.missing)
                 working_var = defaultdict(list)
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
@@ -225,13 +243,17 @@ def main(args: argparse.Namespace):
         prev_var = cur_var.copy()
                 
     # process at the end of the VCF
-    write_vcf(outvcf, working_var, prev_var, counter)
+    write_vcf(outvcf, working_var, prev_var, counter, args.keep, args.missing)
 
     logger.info(f'Read {counter.input} variants')
     logger.info(f'{counter.merge} variants are merged')
-    if counter.conflict_missing > 0:
+    if args.missing == 'warn' and counter.conflict_missing > 0:
         logger.warning(f'{counter.conflict_missing} variants have non-missing genotypes merged with missing genotypes')
-    logger.info(f'{counter.conflict_hap} variants are not merged due to haplotype conflict')
+
+    if args.keep == 'all':
+        logger.info(f'{counter.conflict_hap} variants are not merged due to haplotype conflict')
+    elif args.keep == 'first':
+        logger.info(f'{counter.conflict_hap} variants are dropped due to haplotype conflict')
     logger.info(f'Write {counter.output} variants to {args.outvcf}')
 
     invcf.close()
@@ -239,9 +261,20 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='graph_to_collapse.py', description='Map variants in PanGenie graph VCF to collapsed variants')
+    parser = argparse.ArgumentParser(prog='merge_duplicates.py', description='Merge duplicated variants in phased VCF')
     parser.add_argument('-i', '--invcf', metavar='VCF', help='Input VCF, sorted and phased', required=True)
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
+    parser.add_argument('--keep', metavar='all|first', default='all', help='For duplicated variants with haplotype conflict  (e.g., 1|0 vs 1|0), output all of them (all) or only the first one (first).')
+    parser.add_argument('--missing', metavar='warn|merge|conflict', default='warn',
+                        help='For duplicated variants with missing conflict (e.g., .|0 vs 1|0), merge them with warning (warn), without warning (merge), or treat as haplotype conflict (conflict).')
 
     args = parser.parse_args()
+
+    # check args
+    if args.keep not in {'all', 'first'}:
+        raise ValueError('--keep must be "all" or "first"')
+    
+    if args.missing not in {'warn', 'merge', 'conflict'}:
+        raise ValueError('--missing must be "warn", "merge", or "conflict"')
+
     main(args)
