@@ -105,7 +105,7 @@ python collapse_bubble.py \
 --map merged.mapping.txt
 ```
 
-This `Truvari` API to merge SVs have the same `INFO/BUBBLE_ID`, it output 2 files:
+This script uses `Truvari` API to merge SVs have the same `INFO/BUBBLE_ID`, it output 2 files:
 
 **1. VCF**:
 
