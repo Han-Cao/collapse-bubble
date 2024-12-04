@@ -350,19 +350,22 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam
         has_var_lst.append([has_var(x) for sample in variant.samples.values() for x in sample['GT']])
         missing_lst.append([is_none(x) for sample in variant.samples.values() for x in sample['GT']])
     
+    has_var_arr = np.array(has_var_lst)
+    missing_arr = np.array(missing_lst)
+
     # merge genotypes
     # has any SV -> has collapsed SV
-    merge_has_var = np.array(has_var_lst).any(axis=0)
+    merge_has_var = has_var_arr.any(axis=0)
     # all missing -> missing
     # actually for MC output VCF, 1 missing GT always = all missing
-    merge_missing = np.array(missing_lst).all(axis=0)
+    merge_missing = missing_arr.all(axis=0)
     # if missing -> -1, else, 0 or 1
     merge_gt = merge_has_var.astype(int)
     merge_gt[merge_missing] = -1
 
     # check only: 
     # for one haplotype, maximum one SV
-    if np.array(has_var_lst).sum(axis=0).max() > 1:
+    if has_var_arr.sum(axis=0).max() > 1:
         logger = logging.getLogger(__name__)
         logger.warning(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
@@ -416,7 +419,8 @@ def write_outvcf(invcf: pysam.VariantFile, outvcf: pysam.VariantFile,
         if var_type == 'MNP':
             outvcf.write(var_out)
             continue
-        # For SVs, add SVLEN and check if need to collapse
+        # For SVs, add SVLEN and SVTYPE, check if need to collapse
+        var_out.info['SVTYPE'] = var_type
         var_out.info['SVLEN'] = len(variant.alts[0]) - len(variant.ref)
         if variant.id not in id_map:
             outvcf.write(var_out)
