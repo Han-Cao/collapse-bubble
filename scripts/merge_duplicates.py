@@ -160,7 +160,7 @@ def merge_two_variant(var1: pysam.VariantRecord, var2: pysam.VariantRecord,
     return merged_var, concat_var
 
 
-def merge_var_dict(var_dict: VariantDict, counter: VariantCounter, mis_as_ref: bool) -> VariantDict:
+def merge_var_dict(var_dict: VariantDict, counter: VariantCounter, mis_as_ref: bool, no_id: bool) -> VariantDict:
     """ Perform variant mergeing per position """
 
     while True:
@@ -169,10 +169,10 @@ def merge_var_dict(var_dict: VariantDict, counter: VariantCounter, mis_as_ref: b
             break
 
         merged_var, concat_var = merge_two_variant(dup_var1, dup_var2, counter, mis_as_ref)
-        if concat_var is None:
+        if not no_id:
             merged_var = add_info_id(merged_var, dup_var2, 'DUP_ID')
-        else:
-            concat_var = add_info_id(concat_var, dup_var1, 'CONCAT_ID')
+            if concat_var is not None:
+                concat_var = add_info_id(concat_var, dup_var1, 'CONCAT_ID')
         var_dict.update_merging(merged_var, concat_var)
     
     return var_dict
@@ -240,7 +240,7 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
 
 
 def write_vcf(outvcf: pysam.VariantFile, var_dict: VariantDict, prev_var: pysam.VariantRecord, 
-              counter: VariantCounter, mis_as_ref: bool) -> None:
+              counter: VariantCounter, mis_as_ref: bool, no_id: bool) -> None:
     """ Merge duplicated records and write to output VCF """
 
     # only 1 variant at the previous position
@@ -250,7 +250,7 @@ def write_vcf(outvcf: pysam.VariantFile, var_dict: VariantDict, prev_var: pysam.
         return None
 
     # more than 1 varaints at the previous position
-    var_dict = merge_var_dict(var_dict, counter, mis_as_ref)
+    var_dict = merge_var_dict(var_dict, counter, mis_as_ref, no_id)
 
     for key in var_dict.get_sorted_keys():
         # assert len(var_dict[key]) == 1          # TEST ONLY, should always be true
@@ -294,7 +294,11 @@ def main(args: argparse.Namespace):
     # initialize
     invcf = pysam.VariantFile(args.invcf, 'rb')
     check_vcf(invcf, n=1000)
-    outvcf = pysam.VariantFile(args.outvcf, 'w', header=add_header(invcf.header))
+    if args.no_info_id:
+        header = invcf.header
+    else:
+        header = add_header(invcf.header)
+    outvcf = pysam.VariantFile(args.outvcf, 'w', header=header)
     counter = VariantCounter()
     # (ref, alt) -> list of variants
     # this store variants (if more than 1) at the position of the previous variant
@@ -314,7 +318,7 @@ def main(args: argparse.Namespace):
 
         # process all variants at the previous position
         if cur_var.pos > prev_var.pos:
-            write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref)
+            write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
             working_var_dict = VariantDict()
         # store variants at the same position
         elif cur_var.pos == prev_var.pos:
@@ -325,7 +329,7 @@ def main(args: argparse.Namespace):
         else:
             # end of current chromosome, write all variants on the previous chromosome
             if prev_var.chrom != cur_var.chrom:
-                write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref)
+                write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
                 working_var_dict = VariantDict()
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
@@ -334,7 +338,7 @@ def main(args: argparse.Namespace):
         prev_var = cur_var.copy()
                 
     # process at the end of the VCF
-    write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref)
+    write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
 
     logger.info(f'Read {counter.input} variants')
     logger.info(f'{counter.merge} variants are merged')
@@ -354,6 +358,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
     parser.add_argument('--merge-mis-as-ref', action='store_true', 
                         help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
+    parser.add_argument('--no-info-id', action='store_true', 
+                        help='Do not add INFO/DUP_ID and INFO/CONCAT_ID to output VCF')
 
     args = parser.parse_args()
 
