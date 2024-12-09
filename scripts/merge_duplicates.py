@@ -42,8 +42,7 @@ class VariantDict:
     def add_variant(self, variant: pysam.VariantRecord):
         """ Add variant to dictionary when reading from VCF """
         assert len(variant.alts) == 1
-        key = (variant.ref, variant.alts[0])
-        self.var_dict[key].append(variant)
+        self.var_dict[variant.alleles].append(variant)
 
     
     def get_duplicates(self) -> tuple[pysam.VariantRecord, pysam.VariantRecord]:
@@ -232,7 +231,10 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
     # for AC and AF, Number=A
     variant.info['AC'] = (ac,)
     variant.info['AN'] = an
-    variant.info['AF'] = (ac / an,)
+    if an == 0:
+        variant.info['AF'] = (0,)
+    else:
+        variant.info['AF'] = (ac / an,)
    
     return variant
 
