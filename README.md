@@ -176,20 +176,34 @@ python merge_duplicates.py \
 -o merged.sort.dedup.vcf.gz
 ```
 
-If 2 variants are truly duplicated, we anticipate that they should not have any genotype conflict on the same haplotype (e.g., 1|0 vs 1|0). Therefore, duplicated variants with haplotype conflicts will not be merged and both of them will write to output by default. If `--keep first` is specified, only the first variant will write to output (like `bcftools norm --rm-dup exact`). Moreover, if 2 duplicated variants have both missing and non-missing genotypes on the same haplotype (e.g., .|0 vs 1|0), they can be merged with warning (default), without warning, or not merged just like haplotype conflicts. This can be adjusted by setting `--missing warn|merge|conflict`.
+If there are two identical alleles on the same haplotype, they will be concatenated to create a new variant. For example, two insertions (A → AAA) in sample 2 result in a longer insertion (A → AAAAA).
+
+
+Input:
+```
+#CHROM   POS   ID     REF   ALT     CHM13   Sample1   Sample2   Sample3
+chr1     5     var1   A     AAA     0       0|0       1|0       0|1
+chr1     5     var2   A     AAA     1       1|.       0|0       0|0
+chr1     5     var3   A     AAA     .       0|0       1|0       0|0
+```
+
+Output:
+
+```
+#CHROM   POS   ID     REF   ALT     CHM13   Sample1   Sample2   Sample3
+chr1     5     var1   A     AAA     1       1|.       0|0       0|1
+chr1     5     var3   A     AAAAA   .       0|0       1|0       0|0
+```
+
+Merging missing genotypes with non-missing ones can also yield a missing genotype in one of the variants, depending on whether the merge is with reference or alternate alleles. If the option `--merge-mis-as-ref`` is used, missing genotypes will be treated as reference alleles during the merging process. Merging two missing genotypes will always result in a missing genotype.
 
 **Arguments**:
 
 ```
-usage: merge_duplicates.py [-h] -i VCF -o VCF [--keep all|first] [--missing warn|merge|conflict]
+usage: merge_duplicates.py [-h] -i VCF -o VCF [--merge-mis-as-ref]
 
 options:
   -i VCF, --invcf VCF   Input VCF, sorted and phased
   -o VCF, --outvcf VCF  Output VCF
-  --keep all|first      For duplicated variants with haplotype conflict (e.g., 1|0 vs 1|0), 
-                        output all of them (all) or only the first one (first).
-  --missing warn|merge|conflict
-                        For duplicated variants with missing conflict (e.g., .|0 vs 1|0), 
-                        merge them with warning (warn), without warning (merge), or treat as haplotype 
-                        conflict (conflict).
+  --merge-mis-as-ref    Convert missing to ref when merging missing genotypes with non-missing genotypes
 ```
