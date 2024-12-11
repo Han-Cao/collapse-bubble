@@ -375,6 +375,7 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam
     
     # update genotypes
     hap_idx = 0
+    merge_gt = merge_gt.tolist()
     for sample in var_collapse.samples.values():
         ploidy = len(sample['GT'])
         if ploidy == 1:
