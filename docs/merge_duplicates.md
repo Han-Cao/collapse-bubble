@@ -34,13 +34,11 @@ When concatenating phased alleles, it requires that:
 1. The input VCF should not have any overlapping alleles on the same haplotype before `bcftools norm`
 2. The input VCF should be sorted by only chr and position after `bcftools norm`.
 
-These ensure when 2 alleles are found at the same position, all variants except the first one must be left aligned to this position. Therefore, we can add indels to the first variant to reconstruct the original haplotype. This makes it possbible to concatenate alleles without reference genome (save a lot of time!).
+These ensure when 2 alleles are found at the same position, all variants except the first one must be left aligned to this position. Therefore, we can concatenate indels to the first variant to reconstruct the original haplotype. This makes it possbible to concatenate alleles without querying reference genome.
 
 ## How it works
 
-Merging duplicated variant record in VCF is straiforward, but concatenating overlapping variants is a bit tricky ([previous discussion on why it is difficult](https://github.com/atks/vt/issues/16)). 
-
-**TL;DR**: To concatenate variant A with variant B that was left aligned to the same position of A, we can right shift B to the end of A's reference allele, and then concatenate their alleles.
+**TL;DR**: To concatenate variant A and variant B, we can right shift B to the end of A's reference allele, and then concatenate their alleles.
 
 Proof:
 
