@@ -40,7 +40,8 @@ These ensure when 2 alleles are found at the same position, all variants except 
 
 **TL;DR**: To concatenate variant A and variant B, we can right shift B to the end of A's reference allele, and then concatenate their alleles.
 
-Proof:
+
+### Proof:
 
 According to the [left-align algorithm](https://genome.sph.umich.edu/wiki/Variant_Normalization), we prove:
 
@@ -72,7 +73,7 @@ right shift  GC----CTT  (CCTTC C in VCF, del sequence is  CTTC)
 
 4. **If an indel of length m can right shift longer than its length, then the indel is a tandem repeat, with repeat motif of length M, and m % M == 0**
 
-   Let the indel right shift m bases, given 3, the new sequence is the same as the original one, then it is a tandem repeat
+   Let the indel right shift m bases, given corollary 3, the new sequence is the same as the original one, then it is a tandem repeat
 
 Moreover, in a non-overlapping VCF (requirement 1):
 
@@ -82,7 +83,9 @@ Moreover, in a non-overlapping VCF (requirement 1):
 
 Therefore, to concatenate variant A with an indel left aligned to the same position, we can always right shift the indel to the end of A's reference allele and concatenate the indel sequences to reconstruct the haplotype.
 
-For example, for reference gneome G(GCTA)n, there is an complex variant at the left end: `GGCT` to `AAA` replacement. Moreover, the variant caller also identifies GCTA indels at the right end of GCTA repeats, which is far from the left end. Therefore, after variant normalization, the output VCF include 3 variants:
+
+### Demonstration:
+Given reference gneome G(GCTA)n, there is an complex variant at the left end: `GGCT` to `AAA` replacement. Moreover, there are also GCTA indels at the right end of GCTA repeats. Because the left end replacement and right end indels are far from each other, they were called as separated variants in VCF. Therefore, after variant normalization, the output VCF include 3 variants at the same position:
 
 ```
 VCF representation:
@@ -167,15 +170,15 @@ Q.E.D
 
 
 ## Important note:
-Sorting by `chr` and  `pos` can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer versions, variants are sorted by `chr`, `pos`, `ref`, `alt`, to sort only by `chr` and `pos`, use:
+Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
 
 ```
 (bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -k1,1 -k2,2n) | bgzip > output.vcf.gz
 ```
 
-## Known minor issue in the script:
+## Known limitation in the script:
 
-When concat alleles, what we did is to find all alt alleles and concat them together. This is fast as we only need to care about the sum of all existing alt alleles. However, it could be time-consuming if we need to perfectly ref or missing for other haplotypes:
+To concatenate alleles, the script will find all alt alleles and concat them together. This is fast as we only need to care about the sum of existing alt alleles. However, it could be time-consuming if we need to perfectly determine whether other haplotypes have reference allele or missing genotype:
 
 ```
               sample1   sample2
@@ -187,7 +190,17 @@ When concat alleles, what we did is to find all alt alleles and concat them toge
 -> C AAAAAAA  1|0       ?|0
 ```
 
-- For sample1, we can concat 1,4 to get the final 6A insertion. 
-- For sample2, when consider 1,4, its genotype is `0|0`, but if we also consider 2,3, it should be `.|0`.
+- For sample1, we concat 1,4 to get the final 6A insertion. 
+- For sample2, if also consider 1,4, its genotype is `0|0`, but if we consider 2,3, it should be `.|0`.
  
-This means we need to find all possible combinations that can generate the same allele to determine whether the genotypes for non-alt haplotypes are ref or missing. This requires a lot of time when there are many variants to be considered, and mostly never affect the final result. Therefore, we currently only check the conbinations that are seen (i.e., 1,2,4 not 3,4) in the dataset. If you already specify `--merge-mis-as-ref`, this would not be a problem.
+This means we need to find all possible combinations that can generate the same allele to determine whether the genotypes for non-alt haplotypes are ref or missing. This requires a lot of time when there are many variants to be considered, and most combinations should not affect the final result. Therefore, we currently only check the conbinations that are seen (i.e., 1,4 not 3,4) in existing haplotypes. If you already specify `--merge-mis-as-ref`, this would not be a problem. In this case, the genotypes of concatenated alleles are missing if and only if all existing genotypes are missing:
+
+```
+              sample1   sample2
+1  C AA       1|0       0|.
+2  C AAA      0|.       .|.
+3  C AAA      0|.       1|.
+4  C AAAA     1|.       0|.
+
+-> C AAAAAAA  1|0       0|.
+```
