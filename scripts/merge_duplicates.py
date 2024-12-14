@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Merge duplicated variants in phased VCF
-# Last update: 08-Dec-2024
+# Last update: 14-Dec-2024
 # Author: Han Cao
 
 import argparse
@@ -10,9 +10,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import pysam
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
+
+GT_DICT = {0: 0,
+           1: 1,
+           -1: None}
 
 @dataclass
 class VariantCounter:
@@ -21,197 +26,466 @@ class VariantCounter:
     output: int = 0             # Number of output variants
     merge: int = 0              # Number of varaints merged by genotype
     concat: int = 0             # Number of concatenated varaints
-    conflict_missing: int = 0   # Number of varaints with missing genotype conflict
+    # conflict_missing: int = 0   # Number of varaints with missing genotype conflict
 
 
-class VariantDict:
+class HapIndexer:
+    """ Map haplotype index to sample index """
+
+    def __init__(self, var: pysam.VariantRecord):
+
+        self.idx_dict = {}      # VCF haplotype index -> sample index, ploidy, sample nth hap
+        hap_idx = 0
+        for samp_idx, sample in enumerate(var.samples.values()):
+            ploidy = len(sample['GT'])
+            for n_hap in range(ploidy):
+                self.idx_dict[hap_idx] = (samp_idx, ploidy, n_hap)
+                hap_idx += 1
+    
+    def __getitem__(self, key):
+        return self.idx_dict[key]
+
+
+class DuplicatesDict:
     """ (ref, alt) -> list of variants """
 
-    def __init__(self):
-        self.var_dict = defaultdict(list)
+    def __init__(self) -> None:
+        self.var_lst = []                   # no. -> pysam.VariantRecord
+        self.n_var = 0                      # number of variants in var_lst
+        self.n_merge = 0                    # number of variants merged
+        self.dup_dict = defaultdict(list)   # alleles -> list -> var idx
+        self.gt_mat = np.array([])          # haplotype genotype matrix
 
 
-    def __getitem__(self, key):
-        return self.var_dict[key]
+    def __getitem__(self, key) -> pysam.VariantRecord:
+        return self.var_lst[key]
 
     
-    def __len__(self):
-        return len(self.var_dict)
+    def __len__(self) -> int:
+        return self.n_var
 
     
-    def add_variant(self, variant: pysam.VariantRecord):
+    def add_variant(self, variant: pysam.VariantRecord) -> None:
         """ Add variant to dictionary when reading from VCF """
-        assert len(variant.alts) == 1
-        self.var_dict[variant.alleles].append(variant)
 
-    
-    def get_duplicates(self) -> tuple[pysam.VariantRecord, pysam.VariantRecord]:
-        """ Get a pair of duplicated variants """
+        if variant.ref is None or variant.alts is None:
+            raise ValueError(f"REF and ALT alleles must be provided at {variant.chrom}:{variant.pos}")
 
-        for _, var_lst in self.var_dict.items():
-            if len(var_lst) > 1:
-                return var_lst[0], var_lst[1]
+        if len(variant.alts) != 1:
+            raise ValueError(f"Only biallelic variants are supported, found {len(variant.alts)} alts at {variant.chrom}:{variant.pos}")
         
-        return None, None
+
+        self.var_lst.append(variant)
+        self.dup_dict[variant.alleles].append(self.n_var)
+        self.n_var += 1
 
 
-    def update_merging(self, merged_var: pysam.VariantRecord, concat_var: pysam.VariantRecord):
-        """ Update the dict after merging 2 duplicates """
+    def concatenate(self, # method: str, min_size: int, max_size: int, indel_only: bool,
+                    mis_as_ref: bool, track: str) -> int:
+        """ Concatenate alleles """
 
-        # always update the merged variant
-        self.var_dict[merged_var.alleles][0] = merged_var
-        self.var_dict[merged_var.alleles].pop(1)
-
-        # if a concat variant is created, update
-        if concat_var is not None:
-            self.var_dict[concat_var.alleles].append(concat_var) 
-
-
-    def get_sorted_keys(self):
-        return sorted(self.var_dict.keys())
-
-
-
-# enumerate possible haplotype merging results
-HAP_MERGE_DICT = {
-    (None, None): (None, None),
-    (None, 0): (None, 0),
-    (0, None): (None, 0),
-    (None, 1): (1, None),
-    (1, None): (1, None),
-    (0, 0): (0, 0),
-    (0, 1): (1, 0),
-    (1, 0): (1, 0),                     
-    (1, 1): (0, 1)
-}
-
-HAP_MERGE_DICT_MIS_REF = {
-    (None, None): (None, None),
-    (None, 0): (0, 0),
-    (0, None): (0, 0),
-    (None, 1): (1, 0),
-    (1, None): (1, 0),
-    (0, 0): (0, 0),
-    (0, 1): (1, 0),
-    (1, 0): (1, 0),                     
-    (1, 1): (0, 1)
-}
-
-
-def merge_two_gt(gt1: tuple, gt2: tuple, mis_as_ref: bool) -> tuple:
-    """ Merge two genotypes """
-
-    gt_merge = []
-    gt_concat = []
-    ploidy = len(gt1)
-
-    for i in range(ploidy):
-        if mis_as_ref:
-            gt_merge_i, gt_concat_i = HAP_MERGE_DICT_MIS_REF[(gt1[i], gt2[i])]
+        gt_mat = get_gt_mat(self.var_lst)
+        # concat_variants also in-place update existing genotypes
+        new_vars, new_vars_gt_mat = concat_variants(self.var_lst, 
+                                                    gt_mat, 
+                                                    HapIndexer(self.var_lst[0]), 
+                                                    mis_as_ref, 
+                                                    track)
+        # no variants are concatenated
+        if len(new_vars) == 0:
+            self.gt_mat = gt_mat
+            return 0
         else:
-            gt_merge_i, gt_concat_i = HAP_MERGE_DICT[(gt1[i], gt2[i])]
-        gt_merge.append(gt_merge_i)
-        gt_concat.append(gt_concat_i)    
+            self.gt_mat = np.vstack([gt_mat, new_vars_gt_mat])
+
+        for var in new_vars:
+            self.add_variant(var)
+        assert np.all(self.gt_mat == get_gt_mat(self.var_lst)) # TEST ONLY
+
+        return len(new_vars)
+
     
-    return tuple(gt_merge), tuple(gt_concat)
+    def merge(self, mis_as_ref: bool, track: str) -> int:
+        """ Merge genotypes """
+
+        dup_var_idx = self.get_duplicates()
+        while len(dup_var_idx) > 0:
+            merge_variants([self.var_lst[i] for i in dup_var_idx],
+                           self.gt_mat[dup_var_idx],
+                           mis_as_ref,
+                           track)
+            self.update_merging((self.var_lst[dup_var_idx[0]].alleles))
+            dup_var_idx = self.get_duplicates()
+        
+        return self.n_merge
+        
+        
+    def get_duplicates(self) -> list:
+        """ Get the index of first duplicated variants """
+
+        for _, dup_var_idx in self.dup_dict.items():
+            if len(dup_var_idx) > 1:
+                return dup_var_idx
+        
+        return []
 
 
-def merge_two_variant(var1: pysam.VariantRecord, var2: pysam.VariantRecord, 
-                      counter: VariantCounter, mis_as_ref: bool) -> list:
-    """ 
-    Merge two varaints
-    Return:
-        1. original variant with merged genotypes
-        2. variant alleles will be concat if see 2 alleles on the same haplotype, otherwise None
+    def update_merging(self, dup_key: tuple):
+        """ Update the dup_dict after merging duplicates """
+
+        self.n_merge += len(self.dup_dict[dup_key]) - 1
+        self.dup_dict[dup_key] = [self.dup_dict[dup_key][0]]
+
+    
+    def get_sorted_idx(self) -> list:
+        """ Get index of sorted alleles """
+
+        sorted_keys = sorted(self.dup_dict.keys())
+        return [self.dup_dict[k][0] for k in sorted_keys]
+
+
+## functions to concatenate variants
+def concat_variants(var_lst: list[pysam.VariantRecord], 
+                    gt_mat: np.ndarray, 
+                    hap_indexer: HapIndexer,
+                    mis_as_ref: bool, 
+                    track: str) -> tuple[list[pysam.VariantRecord], np.ndarray]:
     """
+    Concatenate selected variants and update genotypes, genotypes of input variants are updated in-place
+    Return: 
+        1. list of new variant
+        2. genotype matrix of new variants
+    """
+    
+    # gt_mat: n_var x n_hap
+    alt_mat = gt_mat == 1
 
-    merged_var = var1.copy()
-    concat_var = var2.copy()
-    flag_concat = False
-    flag_missing_conflict = False
-
-    for i in range(len(var1.samples)):
-        gt1 = var1.samples[i]['GT']
-        gt2 = var2.samples[i]['GT']
-
-        if not flag_missing_conflict and check_missing_conflict(gt1, gt2):
-            flag_missing_conflict = True
-
-        gt_merge, gt_concat = merge_two_gt(gt1, gt2, mis_as_ref)
-        merged_var.samples[i]['GT'] = gt_merge
-        merged_var.samples[i].phased = True
-        concat_var.samples[i]['GT'] = gt_concat
-        concat_var.samples[i].phased = True
-
-        if not flag_concat and 1 in gt_concat:
-            flag_concat = True
-
-    if flag_concat:
-        concat_var.alleles = concat_alleles(concat_var.alleles)
-        counter.concat += 1
+    if mis_as_ref:
+        # any non-missing -> non-missing
+        non_mis_hap_idx = np.any(gt_mat != -1, axis=0)
     else:
-        concat_var = None
-        counter.merge += 1
+        non_mis_hap_idx = None   # if not mis_as_ref, this should not be used
 
-    if flag_missing_conflict:
-        # logger.warning(f'Sample {var1.samples[i].name} has missing genotype conflict at {var1.chrom}:{var1.pos} {var1.ref} {var1.alts[0]}')
-        counter.conflict_missing += 1
+    alt_sum_arr = alt_mat.sum(axis=0)
+    ret_gt_lst = []
+    ret_var_lst = []
+    concat_n = 0
+    while alt_sum_arr.max() > 1:
+        # select the one with the most alt alleles to process
+        # this ensure that, if other variants have all 1, no additional alt exist
+        hap_idx = alt_sum_arr.argmax()
+        # find variants with alt
+        var_idx = np.where(alt_mat[:, hap_idx])[0]
 
-    return merged_var, concat_var
+        # concat genotypes
+        new_gt = concat_gt_mat(gt_mat[var_idx], mis_as_ref)
+        if mis_as_ref:
+            force_ref_idx = (new_gt == -1) & non_mis_hap_idx
+            new_gt[force_ref_idx] = 0
 
+        # update genotypes of finished hap as they have been consumed
+        reset_hap_idx = np.where(new_gt == 1)[0]
+        alt_sum_arr[reset_hap_idx] = 0
+        gt_mat[np.ix_(var_idx, reset_hap_idx)] = 0
+        # in-place update VariantRecord
+        for i in var_idx:
+            update_gt_at(var_lst[i], reset_hap_idx.tolist(), hap_indexer, 
+                         [0] * reset_hap_idx.shape[0])
 
-def merge_var_dict(var_dict: VariantDict, counter: VariantCounter, mis_as_ref: bool, no_id: bool) -> VariantDict:
-    """ Perform variant mergeing per position """
-
-    while True:
-        dup_var1, dup_var2 = var_dict.get_duplicates()
-        if dup_var1 is None:
-            break
-
-        merged_var, concat_var = merge_two_variant(dup_var1, dup_var2, counter, mis_as_ref)
-        if not no_id:
-            merged_var = add_info_id(merged_var, dup_var2, 'DUP_ID')
-            if concat_var is not None:
-                concat_var = add_info_id(concat_var, dup_var1, 'CONCAT_ID')
-        var_dict.update_merging(merged_var, concat_var)
+        # create new variant
+        new_var = create_concat_var([var_lst[i] for i in var_idx], new_gt.tolist(),
+                                    concat_n, track)
+        if new_var is not None:
+            ret_var_lst.append(new_var)
+            ret_gt_lst.append(new_gt)
+            concat_n += 1
     
-    return var_dict
+    return ret_var_lst, np.array(ret_gt_lst)
 
 
-def concat_alleles(alleles: tuple[str, str]) -> tuple:
-    """ Concatenate duplicated alleles """
+def get_gt_mat(var_lst: list[pysam.VariantRecord]) -> np.ndarray:
+    """ Save genotypes to a matrix """
 
-    # left-trim same bases to find the unique sequence
-    ref_uniq = alleles[0]
-    alt_uniq = alleles[1]
+    gt_mat_lst = []
+    for variant in var_lst:
+        gt_var_lst = []
+        for sample in variant.samples.values():
+            for x in sample['GT']:
+                if x is None:
+                    gt_var_lst.append(-1)
+                else:
+                    gt_var_lst.append(x)
+        gt_mat_lst.append(gt_var_lst)
 
-    while len(ref_uniq) > 0 and len(alt_uniq) > 0 and ref_uniq[0] == alt_uniq[0]:
-        ref_uniq = ref_uniq[1:]
-        alt_uniq = alt_uniq[1:]
+    return np.array(gt_mat_lst, dtype=np.int8)
+
+
+def concat_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
+    """ Get concatenated genotypes from a matrix """
+
+    # all 1 -> 1, any 0 -> 0, else -1
+    gt_arr = np.empty(gt_mat.shape[1], dtype=np.int8)
+    gt_arr.fill(-1)
+
+    is_alt = np.all(gt_mat == 1, axis=0)
+    if not mis_as_ref:
+        is_ref = np.any(gt_mat == 0, axis=0)
+    # if mis_as_ref, only all -1 -> -1
+    else:
+        is_ref = np.any(gt_mat != -1, axis=0)
+        is_ref[is_alt] = False
+    gt_arr[is_alt] = 1
+    gt_arr[is_ref] = 0
+
+    return gt_arr
+
+
+def create_concat_var(var_lst: list[pysam.VariantRecord], gt_lst: list[int],
+                      var_id_no: int, track: str) -> pysam.VariantRecord | None:
+    """ Concatenate a list of variants to create a new one """
+
+    concat_ref, concat_alt = concat_alleles(var_lst)
+    # no variants after merging alleles
+    if concat_ref == concat_alt:
+        return None
+    
+    new_var = var_lst[-1].copy()
+    new_var.id = f'{new_var.chrom}:{new_var.pos}_{var_id_no}'
+    new_var.alleles = (concat_ref, concat_alt)
+
+    new_var.info.clear()
+    if track == "ID":
+        new_var.info['CONCAT'] = ':'.join([var.id for var in var_lst if var.id is not None])
+    elif track == "AT":
+        ref_at = ':'.join([var.info['AT'][0] for var in var_lst])
+        alt_at = ':'.join([var.info['AT'][1] for var in var_lst])
+        new_var.info['CONCAT'] = ref_at + '_' + alt_at
+
+    update_gt_all(new_var, gt_lst)
+
+    return new_var
+
+
+def concat_alleles(var_lst: list[pysam.VariantRecord]) -> tuple[str, str]:
+    """ Concatenate alleles """
+
+    assert len(var_lst) > 1    # TEST ONLY, should always be true
+
+    ref, alt = var_lst[0].alleles   # type: ignore
+    ref0 = ref[0]
+    ref_trim = ref[1:]
+
+    # # TEST code
+    # if len(ref) > 1 and len(alt) > 1:
+    #     print(f'Found complex base variant at {var_lst[0].chrom}:{var_lst[0].pos}')
+
+    for i in range(1, len(var_lst)):
+        add_ref, add_alt = var_lst[i].alleles  # type: ignore
+        # process indels
+        if is_indel(add_ref, add_alt):
+            add_indel = get_indel_seq(add_ref, add_alt)
+            check_indel(ref_trim, add_indel, var_lst[i])
+
+            # deletion
+            if len(add_ref) > 1:
+                ref_trim = add_indel + ref_trim
+            # insertion
+            else:
+                n_shift = len(ref_trim)
+                alt = alt + right_shift_indel(add_indel, n_shift)
+        else:
+            check_replacement(ref, alt, var_lst[i])
+    
+    # right-trim
+    ref = ref0 + ref_trim
+    ref, alt = right_trim_alleles((ref, alt))
+
+    return ref, alt
+
+
+def check_replacement(ref: str, alt: str, var_add: pysam.VariantRecord) -> None:
+    """ Check SNP, MNP, and complex replacement variants """
+
+    # here we assume all replacements are just redundantly called
+    logger.debug(f"Overlapping alleles between" +
+                 f"{var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} and {ref}:{alt}") # type: ignore
+    ref_add, alt_add = var_add.alleles # type: ignore
+    if ref[:len(ref_add)] != ref_add or alt[:len(alt_add)] != alt_add:
+        logger.warning(f"Ignore {var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} " +  # type: ignore
+                        "due to conflict with existing variant {ref}:{alt}")
+
+
+def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -> None:
+    """ Check if a variant can be correctly concatenated with an INDEL """
+    
+    # check if the second can be right-shifted to the end of base's ref
+    indel_len = len(indel_seq)
+    ref_trim_len = len(ref_trim)
+
+    if ref_trim_len <= indel_len:
+        expect_ref_trim = indel_seq[0:ref_trim_len]
+    else:
+        n_copy = ref_trim_len // indel_len
+        n_shift = ref_trim_len % indel_len
+        if n_shift == 0:
+            expect_ref_trim = indel_seq * n_copy
+        else:
+            expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
+
+    if expect_ref_trim != ref_trim:
+        raise ValueError(f"{var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} " +  # type: ignore
+                         f"cannot be right shifted to concatenate with {ref_trim}.")
+
+
+def right_shift_indel(seq: str, n: int) -> str:
+    """ Right shift a sequence n bases """
+
+    n = n % len(seq)
+    return seq[n:] + seq[:n]
+
+
+def right_trim_alleles(alleles: tuple[str, str]) -> tuple:
+    """ Left-trim same bases """
+
+    ref_trim = alleles[0]
+    alt_trim = alleles[1]
+
+    while len(ref_trim) > 1 and len(alt_trim) > 1 and ref_trim[-1] == alt_trim[-1]:
+        ref_trim = ref_trim[:-1]
+        alt_trim = alt_trim[:-1]
        
-    return alleles[0] + ref_uniq, alleles[1] + alt_uniq
+    return ref_trim, alt_trim
 
 
-def check_missing_conflict(gt1: tuple, gt2: tuple) -> bool:
-    """ Check if two haplotypes are co-missing """
+def get_indel_seq(ref: str, alt: str) -> str:
+    """ Get indel sequence """
 
-    for hap1, hap2 in zip(gt1, gt2):
-        if (hap1 is None) ^ (hap2 is None):
-            return True
+    if len(ref) == 1:
+        return alt[1:]
+    else:
+        return ref[1:]
+
+
+def update_gt_all(var: pysam.VariantRecord, gt_lst: list[int], phased: bool=True):
+    """ In-place update genotypes from a list """
+
+    # update genotypes
+    hap_idx = 0
+    for sample in var.samples.values():
+        ploidy = len(sample['GT'])
+        new_gt = gt_lst[hap_idx: hap_idx + ploidy]
+        new_gt = [GT_DICT[x] for x in new_gt]
+        sample['GT'] = tuple(new_gt)
+        sample.phased = phased
+        hap_idx += ploidy
+
+        
+def update_gt_at(var: pysam.VariantRecord, idx_lst: list[int], hap_indexer: HapIndexer,
+                 gt_lst: list[int], phased: bool=True):
+    """ In-place update genotypes at a specific position """
+
+    for i, gt in zip(idx_lst, gt_lst):  
+
+        samp_idx, ploidy, n_hap = hap_indexer[i]
+        
+        old_gt = var.samples[samp_idx]['GT']
+        new_gt = list(old_gt)
+        new_gt[n_hap] = GT_DICT[gt]
+        var.samples[samp_idx]['GT'] = tuple(new_gt)
+        var.samples[samp_idx].phased = phased
+
+
+def is_indel(ref: str, alt: str) -> bool:
+    """ Check if a variant is an indel """
+
+    return (len(ref) != 1) != (len(alt) != 1)
     
-    return False
+
+## end of concat functions
 
 
-def add_info_id(var_keep: pysam.VariantRecord, var_add: pysam.VariantRecord, key: str) -> pysam.VariantRecord:
-    """ Add DUP_ID or CONCAT_ID to INFO """
 
-    id_lst = [var_keep.info[key][0]] if key in var_keep.info else []
-    id_lst += [var_keep.info[key][0]] if key in var_add.info else []
-    id_lst += [var_add.id]
 
-    var_keep.info[key] = ':'.join(id_lst)
+## functions to merge identical variants
 
-    return var_keep
+def merge_variants(var_lst: list[pysam.VariantRecord], gt_mat: np.ndarray, 
+                   mis_as_ref: bool, merge_id: str) -> None:
+    """ In-place merge identical variants """
+
+    merged_var = var_lst[0]
+    gt_merge = merge_gt_mat(gt_mat, mis_as_ref)
+    update_gt_all(merged_var, gt_merge.tolist())
+
+    dup_lst = []
+    concat_lst = []
+
+    for var in var_lst:
+        if 'CONCAT' in var.info:
+            concat_lst.append(var.info['CONCAT'][0])
+        elif merge_id == "ID":
+            dup_lst.append(var.id)
+        elif merge_id == "AT":
+            dup_lst.append(var.info['AT'][0] + '_' + var.info['AT'][1])
+
+    if len(dup_lst) > 1:
+        merged_var.info['DUP'] = dup_lst
+
+    if len(concat_lst) > 1:
+        merged_var.info['CONCAT'] = concat_lst
+
+    # check if multiple alleles on the same haplotype:
+    if np.any(np.sum(gt_mat==1, axis=0) > 1):
+        logger.warning(f'More than 1 alleles on the same haplotype for variant: ' +
+                       f'{merged_var.chrom}:{merged_var.pos}:{merged_var.ref}_{merged_var.alts[0]}') # type: ignore
+            
+
+def merge_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
+    """ Merge genotype matrix """
+
+    # initialize with all missing
+    ret_gt = np.empty(gt_mat.shape[1], dtype=np.int8)
+    ret_gt.fill(-1)
+
+    # any 1 -> 1
+    is_alt = np.any(gt_mat == 1, axis=0)
+    # if mis_as_ref, any 0 -> 0 if not is_alt
+    if mis_as_ref:
+        is_ref = np.any(gt_mat != -1, axis=0)
+        is_ref[is_alt] = False
+    # otherwise, all 0 -> 0
+    else:
+        is_ref = np.all(gt_mat == 0, axis=0)
+    ret_gt[is_alt] = 1
+    ret_gt[is_ref] = 0
+
+    return ret_gt
+
+## end of merge functions
+
+
+# O(n) algorithm from https://stackoverflow.com/questions/6021274
+def find_rep_motif(allele: str) -> str:
+    if not allele:
+        return allele
+
+    nxt = [0]*len(allele)
+    for i in range(1, len(nxt)):
+        k = nxt[i - 1]
+        while True:
+            if allele[i] == allele[k]:
+                nxt[i] = k + 1
+                break
+            elif k == 0:
+                nxt[i] = 0
+                break
+            else:
+                k = nxt[k - 1]
+
+    rep_len = len(allele) - nxt[-1]
+    if len(allele) % rep_len != 0:
+        return allele
+
+    return allele[0:rep_len]
 
 
 def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
@@ -239,22 +513,31 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
     return variant
 
 
-def write_vcf(outvcf: pysam.VariantFile, var_dict: VariantDict, prev_var: pysam.VariantRecord, 
-              counter: VariantCounter, mis_as_ref: bool, no_id: bool) -> None:
+def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: pysam.VariantRecord, 
+                 counter: VariantCounter, mis_as_ref: bool, track: str) -> None:
     """ Merge duplicated records and write to output VCF """
 
     # only 1 variant at the previous position
-    if len(var_dict) == 0:
+    n_input = len(var_dict)
+    if n_input == 0:
         outvcf.write(prev_var)
         counter.output += 1
         return None
 
-    # more than 1 varaints at the previous position
-    var_dict = merge_var_dict(var_dict, counter, mis_as_ref, no_id)
+    # merge if more than 1 varaints at the previous position
+    n_concat = var_dict.concatenate(mis_as_ref=mis_as_ref, 
+                                    track=track)
+    n_merge =var_dict.merge(mis_as_ref=mis_as_ref, 
+                            track=track)
+    logger.debug(f'{prev_var.chrom}:{prev_var.pos}: read {n_input}, concatenate {n_concat}, merge {n_merge}')
 
-    for key in var_dict.get_sorted_keys():
-        # assert len(var_dict[key]) == 1          # TEST ONLY, should always be true
-        out_var = update_ac(var_dict[key][0])
+    counter.concat += n_concat
+    counter.merge += n_merge
+
+
+    for k in var_dict.get_sorted_idx():
+        out_var = var_dict.var_lst[k]
+        out_var = update_ac(out_var)
         outvcf.write(out_var)
         counter.output += 1
 
@@ -262,9 +545,8 @@ def write_vcf(outvcf: pysam.VariantFile, var_dict: VariantDict, prev_var: pysam.
 def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
     """ Add required headers """
     
-    header.add_line('##INFO=<ID=DUP_ID,Number=A,Type=String,Description="Colon-separated duplicated variants merged into this variant">')
-    header.add_line('##INFO=<ID=CONCAT_ID,Number=A,Type=String,Description="Colon-separated variants concatenated into this variant">')
-    # header.add_line('##INFO=<ID=DROP_ID,Number=A,Type=String,Description="Colon-separated duplicated varinats dropped due to haplotype conflict">')
+    header.add_line('##INFO=<ID=DUP,Number=.,Type=String,Description="List of variant ID or allele traversal merged into this variant">')
+    header.add_line('##INFO=<ID=CONCAT,Number=.,Type=String,Description="List of variant ID or allele traversal concatenated into this variant">')
 
     return header
 
@@ -278,37 +560,37 @@ def check_vcf(vcf: pysam.VariantFile, n: int) -> None:
 
         for sample in var.samples.values():
             ploidy = len(sample['GT'])
-            if ploidy > 2:
-                raise ValueError(f'Ploidy {ploidy} is not supported yet')
-            if ploidy == 2 and not sample.phased:
-                raise ValueError(f'Unphased diploid sample is not supported')
+            if ploidy >= 2 and not sample.phased:
+                raise ValueError(f'Unphased sample is not supported')
 
 
 def main(args: argparse.Namespace):
 
     # setup logger
-    logging.basicConfig(level=logging.INFO,
+    if args.debug:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    logging.basicConfig(level=log_level,
                         format='[%(asctime)s] - [%(levelname)s]: %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
     
     # initialize
     invcf = pysam.VariantFile(args.invcf, 'rb')
     check_vcf(invcf, n=1000)
-    if args.no_info_id:
+    if args.track is None:
         header = invcf.header
     else:
         header = add_header(invcf.header)
     outvcf = pysam.VariantFile(args.outvcf, 'w', header=header)
     counter = VariantCounter()
-    # (ref, alt) -> list of variants
-    # this store variants (if more than 1) at the position of the previous variant
-    working_var_dict = VariantDict()
-
 
     logger.info(f'Merge duplicated variants from: {args.invcf}')
+
     # to check duplicates, we always write variants after reading its next one
     # if cur_var.pos = prev_var.pos, save them to working_var
     # if cur_var.pos > prev_var.pos, write all variants in prev_var.pos
+    working_var_dict = DuplicatesDict()
     invcf_iter = invcf.fetch()
     prev_var = next(invcf_iter)
     counter.input += 1
@@ -318,8 +600,8 @@ def main(args: argparse.Namespace):
 
         # process all variants at the previous position
         if cur_var.pos > prev_var.pos:
-            write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
-            working_var_dict = VariantDict()
+            process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
+            working_var_dict = DuplicatesDict()
         # store variants at the same position
         elif cur_var.pos == prev_var.pos:
             # for the first 2 variants, store both
@@ -329,8 +611,8 @@ def main(args: argparse.Namespace):
         else:
             # end of current chromosome, write all variants on the previous chromosome
             if prev_var.chrom != cur_var.chrom:
-                write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
-                working_var_dict = VariantDict()
+                process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
+                working_var_dict = DuplicatesDict()
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
                 raise ValueError('Input VCF is not sorted')
@@ -338,13 +620,13 @@ def main(args: argparse.Namespace):
         prev_var = cur_var.copy()
                 
     # process at the end of the VCF
-    write_vcf(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.no_info_id)
+    process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
 
     logger.info(f'Read {counter.input} variants')
     logger.info(f'{counter.merge} variants are merged')
     logger.info(f'{counter.concat} variants are concatenated')
-    if counter.conflict_missing > 0:
-        logger.info(f'{counter.conflict_missing} variants have non-missing genotypes merged with missing genotypes')
+    # if counter.conflict_missing > 0:
+    #     logger.info(f'{counter.conflict_missing} variants have non-missing genotypes merged with missing genotypes')
 
     logger.info(f'Write {counter.output} variants to {args.outvcf}')
 
@@ -358,8 +640,10 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
     parser.add_argument('--merge-mis-as-ref', action='store_true', 
                         help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
-    parser.add_argument('--no-info-id', action='store_true', 
-                        help='Do not add INFO/DUP_ID and INFO/CONCAT_ID to output VCF')
+    parser.add_argument('-t', '--track', choices=['ID', 'AT'], default=None,
+                        help='Track how variants are merged by "ID", "AT", or disable (default)')
+    parser.add_argument('--debug', action='store_true', 
+                        help='Debug mode')
 
     args = parser.parse_args()
 
