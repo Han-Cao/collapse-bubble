@@ -42,13 +42,13 @@ These ensure when 2 alleles are found at the same position, all variants except 
 
 $$ Allele_{concat} =  Allele_A + S_B[n:m] + S_B[0:n] $$
 
-where $ Allele_A $ is the REF or ALT allele of variant A to be concatenated, $ S_B $ is the left-trimed indel sequence of variant B, $ m = len(S_B) $, and $ n = [len(REF_A) - 1] \mod m $.
+where $Allele_A$ is the REF or ALT allele of variant A to be concatenated, $S_B$ is the left-trimed indel sequence of variant B, $m = len(S_B)$, and $n = [len(REF_A) - 1] \mod m$.
 
-Particularly, for deletions, the above is equivalent to insert the left-trimed REF_B after the first base of REF_A :
+Particularly, for deletions, the above is equivalent to insert the left-trimed $REF_B$ after the first base of $REF_A$ :
 
 $$ REF_{concat} = REF_A[0] + S_B + REF_A[1:len(REF_A)] $$
 
-Examples:
+Example:
 ```
 ref  GGCTAGCTA      (span from 1-9)
 hap1 AAA-A----      (GGCT to AAA + GCTA del)
