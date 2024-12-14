@@ -81,6 +81,10 @@ alt = AAAA
 
 ### Proof:
 
+Definition:
+- Allele: We assume all alleles are already normalized, which have at least 1 base in both REF and ALT, and have been left/right trimmed if possible
+- Indel sequence: The sequence of an indel only include the inserted / deleted sequence, for example, given variant with alleles of GCCC G, the indel sequence is CCC
+
 According to the [left-align algorithm](https://genome.sph.umich.edu/wiki/Variant_Normalization), we prove:
 
 1. **Only indels can be left aligned**: 
@@ -93,25 +97,24 @@ According to the [left-align algorithm](https://genome.sph.umich.edu/wiki/Varian
 
 3. **If right shift an indel x bases, the new indel sequence is: s[n:m] + s[0:n], where n = x % m, s is the original indel sequence**
 
-   Right shift 1 base: left trim 1 allele, extend the same allele to the right end of ref and alt, for example
+   Right shift 1 base: left trim 1 allele, extend the next base of reference genome to the right end of ref and alt. As this variant has been left aligned, the extended allele is always the same as the first base of the indel sequence Therefore, right shift an allele is the same as right shift a string if the reference genome allow right shift. For example:
 ```
-ref GCCTTCCTT
-alt GCCTT
+ref GGCTAGCTA
+alt GGCTA
 
-             GCCTTCCTT
-left aligned G----CCTT  (GCCTT G in VCF, del sequence is CCTT)
-right shift  GC----CTT  (CCTTC C in VCF, del sequence is  CTTC)
+             GGCTAGCTA
+left aligned G----GCTA  (GGCTA G in VCF, del sequence is GCTA)
+right shift  GG----CTA  (GCTAG G in VCF, del sequence is  CTAG)
 
 -> right shift 1 base   =  s -> s[1:m] + s[0:1]
 -> right shift n bases  =  s -> s[n:m] + s[0:n], if n <= m
 -> right shift m bases  =  s -> s
--> right shift x bases  =  right shift (x - m) bases, where x >= m
 -> right shift x bases  =  s -> s[n:m] + s[0:n], where n = x % m
 ```
 
 4. **If an indel of length m can right shift longer than its length, then the indel is a tandem repeat, with repeat motif of length M, and m % M == 0**
 
-   Let the indel right shift m bases, given corollary 3, the new sequence is the same as the original one, then it is a tandem repeat
+   Let the indel right shift m bases, the new sequence is the same as the original one, then it is a tandem repeat
 
 Moreover, in a non-overlapping VCF (requirement 1):
 
