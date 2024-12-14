@@ -80,27 +80,71 @@ class DuplicatesDict:
         self.n_var += 1
 
 
-    def concatenate(self, # method: str, min_size: int, max_size: int, indel_only: bool,
-                    mis_as_ref: bool, track: str) -> int:
+    def concatenate(self, hap_indexer: HapIndexer, method: str, 
+                    mis_as_ref: bool, track: str, max_repeat: int) -> int:
         """ Concatenate alleles """
 
         gt_mat = get_gt_mat(self.var_lst)
-        # concat_variants also in-place update existing genotypes
-        new_vars, new_vars_gt_mat = concat_variants(self.var_lst, 
-                                                    gt_mat, 
-                                                    HapIndexer(self.var_lst[0]), 
-                                                    mis_as_ref, 
-                                                    track)
+
+        if method == "none":
+            self.gt_mat = gt_mat
+            return 0
+        
+        new_vars = []
+        if method == "position":
+            # here, we pass the original gt_mat, so it is updated in-place
+            new_vars, new_vars_gt_mat, _ = concat_variants(self.var_lst, 
+                                                           gt_mat, 
+                                                           hap_indexer, 
+                                                           mis_as_ref, 
+                                                           track)
+        elif method == "repeat":
+            motif_dict = defaultdict(list)
+            new_vars_gt_lst = []
+            # find repeat motif for all variants
+            for i, var in enumerate(self.var_lst):
+                ref, alt = var.alleles
+                if not is_indel(ref, alt):
+                    continue
+                indel_seq = get_indel_seq(ref, alt)
+                if max_repeat is not None and len(indel_seq) > max_repeat:
+                    continue
+                motif = find_rep_motif(indel_seq)
+                motif_dict[motif].append(i)
+            
+            for _, concat_var_idx in motif_dict.items():
+                if len(concat_var_idx) < 2:
+                    continue
+                # here, we pass a copy of gt_mat, so we need to update the gt_mat
+                tmp_vars, tmp_gt_mat, update_gt_mat = concat_variants([self.var_lst[i] for i in concat_var_idx],
+                                                                      gt_mat[concat_var_idx],
+                                                                      hap_indexer,
+                                                                      mis_as_ref,
+                                                                      track)
+                gt_mat[concat_var_idx] = update_gt_mat
+                # concat 2 indels mean result in no variant, make sure append real variant
+                if len(tmp_vars) > 0:
+                    new_vars.extend(tmp_vars)
+                    new_vars_gt_lst.append(tmp_gt_mat)
+            
+            # combine all genotypes
+            if len(new_vars_gt_lst) > 0:
+                new_vars_gt_mat = np.vstack(new_vars_gt_lst)
+
+        else:
+            raise ValueError(f"Unknown concatenation method: {method}")
+            
+
         # no variants are concatenated
         if len(new_vars) == 0:
             self.gt_mat = gt_mat
             return 0
         else:
-            self.gt_mat = np.vstack([gt_mat, new_vars_gt_mat])
+            self.gt_mat = np.vstack([gt_mat, new_vars_gt_mat]) # type: ignore
 
         for var in new_vars:
             self.add_variant(var)
-        assert np.all(self.gt_mat == get_gt_mat(self.var_lst)) # TEST ONLY
+        assert np.all(self.gt_mat == get_gt_mat(self.var_lst)) # TEST ONLY, should be true
 
         return len(new_vars)
 
@@ -108,27 +152,17 @@ class DuplicatesDict:
     def merge(self, mis_as_ref: bool, track: str) -> int:
         """ Merge genotypes """
 
-        dup_var_idx = self.get_duplicates()
-        while len(dup_var_idx) > 0:
+        dup_var_idx = get_duplicates(self.dup_dict)
+        while len(dup_var_idx) > 1:
             merge_variants([self.var_lst[i] for i in dup_var_idx],
                            self.gt_mat[dup_var_idx],
                            mis_as_ref,
                            track)
             self.update_merging((self.var_lst[dup_var_idx[0]].alleles))
-            dup_var_idx = self.get_duplicates()
+            dup_var_idx = get_duplicates(self.dup_dict)
         
         return self.n_merge
-        
-        
-    def get_duplicates(self) -> list:
-        """ Get the index of first duplicated variants """
-
-        for _, dup_var_idx in self.dup_dict.items():
-            if len(dup_var_idx) > 1:
-                return dup_var_idx
-        
-        return []
-
+    
 
     def update_merging(self, dup_key: tuple):
         """ Update the dup_dict after merging duplicates """
@@ -144,17 +178,31 @@ class DuplicatesDict:
         return [self.dup_dict[k][0] for k in sorted_keys]
 
 
+
+def get_duplicates(dup_dict: dict[str, list]) -> list:
+    """ Get the index of first duplicated variants """
+
+    for _, dup_var_idx in dup_dict.items():
+        if len(dup_var_idx) > 1:
+            return dup_var_idx
+    
+    return []
+
+
 ## functions to concatenate variants
 def concat_variants(var_lst: list[pysam.VariantRecord], 
                     gt_mat: np.ndarray, 
                     hap_indexer: HapIndexer,
                     mis_as_ref: bool, 
-                    track: str) -> tuple[list[pysam.VariantRecord], np.ndarray]:
+                    track: str) -> tuple[list[pysam.VariantRecord], np.ndarray, np.ndarray]:
     """
-    Concatenate selected variants and update genotypes, genotypes of input variants are updated in-place
+    Concatenate selected variants and update genotypes
+    Genotypes of input variants are updated in-place if input if a view not a copy
+
     Return: 
         1. list of new variant
         2. genotype matrix of new variants
+        3. genotype matrix of updated input variants
     """
     
     # gt_mat: n_var x n_hap
@@ -200,7 +248,7 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
             ret_gt_lst.append(new_gt)
             concat_n += 1
     
-    return ret_var_lst, np.array(ret_gt_lst)
+    return ret_var_lst, np.array(ret_gt_lst), gt_mat
 
 
 def get_gt_mat(var_lst: list[pysam.VariantRecord]) -> np.ndarray:
@@ -308,10 +356,10 @@ def check_replacement(ref: str, alt: str, var_add: pysam.VariantRecord) -> None:
 
     # here we assume all replacements are just redundantly called
     logger.debug(f"Overlapping alleles between" +
-                 f"{var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} and {ref}:{alt}") # type: ignore
+                 f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} and {ref}:{alt}") # type: ignore
     ref_add, alt_add = var_add.alleles # type: ignore
     if ref[:len(ref_add)] != ref_add or alt[:len(alt_add)] != alt_add:
-        logger.warning(f"Ignore {var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} " +  # type: ignore
+        logger.warning(f"Ignore {var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
                         "due to conflict with existing variant {ref}:{alt}")
 
 
@@ -333,7 +381,7 @@ def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -
             expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
 
     if expect_ref_trim != ref_trim:
-        raise ValueError(f"{var_add.chrom}:{var_add.pos}:{var_add.ref}:{var_add.alts[0]} " +  # type: ignore
+        raise ValueError(f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
                          f"cannot be right shifted to concatenate with {ref_trim}.")
 
 
@@ -398,6 +446,9 @@ def update_gt_at(var: pysam.VariantRecord, idx_lst: list[int], hap_indexer: HapI
 def is_indel(ref: str, alt: str) -> bool:
     """ Check if a variant is an indel """
 
+    if ref[0] != alt[0]:
+        return False
+
     return (len(ref) != 1) != (len(alt) != 1)
     
 
@@ -428,9 +479,9 @@ def merge_variants(var_lst: list[pysam.VariantRecord], gt_mat: np.ndarray,
             dup_lst.append(var.info['AT'][0] + '_' + var.info['AT'][1])
 
     if len(dup_lst) > 1:
-        merged_var.info['DUP'] = dup_lst
+        merged_var.info['DUP'] = dup_lst[1:]
 
-    if len(concat_lst) > 1:
+    if len(concat_lst) > 0:
         merged_var.info['CONCAT'] = concat_lst
 
     # check if multiple alleles on the same haplotype:
@@ -514,7 +565,8 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
 
 
 def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: pysam.VariantRecord, 
-                 counter: VariantCounter, mis_as_ref: bool, track: str) -> None:
+                 hap_indexer: HapIndexer, counter: VariantCounter, concat_method: str, 
+                 mis_as_ref: bool, track: str, max_repeat: int) -> None:
     """ Merge duplicated records and write to output VCF """
 
     # only 1 variant at the previous position
@@ -525,8 +577,11 @@ def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: 
         return None
 
     # merge if more than 1 varaints at the previous position
-    n_concat = var_dict.concatenate(mis_as_ref=mis_as_ref, 
-                                    track=track)
+    n_concat = var_dict.concatenate(hap_indexer=hap_indexer, 
+                                    method=concat_method,
+                                    mis_as_ref=mis_as_ref,
+                                    track=track,
+                                    max_repeat=max_repeat)
     n_merge =var_dict.merge(mis_as_ref=mis_as_ref, 
                             track=track)
     logger.debug(f'{prev_var.chrom}:{prev_var.pos}: read {n_input}, concatenate {n_concat}, merge {n_merge}')
@@ -584,8 +639,12 @@ def main(args: argparse.Namespace):
         header = add_header(invcf.header)
     outvcf = pysam.VariantFile(args.outvcf, 'w', header=header)
     counter = VariantCounter()
+    hap_indexer = HapIndexer(next(invcf.fetch()))
 
     logger.info(f'Merge duplicated variants from: {args.invcf}')
+    if args.concat == "none":
+        logger.info("Skip variant concatenation")
+    logger.info(f'Concatenate variants with same {args.concat}')
 
     # to check duplicates, we always write variants after reading its next one
     # if cur_var.pos = prev_var.pos, save them to working_var
@@ -600,7 +659,8 @@ def main(args: argparse.Namespace):
 
         # process all variants at the previous position
         if cur_var.pos > prev_var.pos:
-            process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
+            process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter,
+                         args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
             working_var_dict = DuplicatesDict()
         # store variants at the same position
         elif cur_var.pos == prev_var.pos:
@@ -611,7 +671,8 @@ def main(args: argparse.Namespace):
         else:
             # end of current chromosome, write all variants on the previous chromosome
             if prev_var.chrom != cur_var.chrom:
-                process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
+                process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
+                             args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
                 working_var_dict = DuplicatesDict()
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
@@ -620,7 +681,8 @@ def main(args: argparse.Namespace):
         prev_var = cur_var.copy()
                 
     # process at the end of the VCF
-    process_dups(outvcf, working_var_dict, prev_var, counter, args.merge_mis_as_ref, args.track)
+    process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
+                 args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
 
     logger.info(f'Read {counter.input} variants')
     logger.info(f'{counter.merge} variants are merged')
@@ -638,10 +700,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='merge_duplicates.py', description='Merge duplicated variants in phased VCF')
     parser.add_argument('-i', '--invcf', metavar='VCF', help='Input VCF, sorted and phased', required=True)
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
-    parser.add_argument('--merge-mis-as-ref', action='store_true', 
-                        help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
+    parser.add_argument('-c', '--concat', choices=['position', 'repeat', 'none'], default='position',
+                        help='Concatenate variants when they have identical "position" (default) or "repeat" motif, "none" to skip')
     parser.add_argument('-t', '--track', choices=['ID', 'AT'], default=None,
                         help='Track how variants are merged by "ID", "AT", or disable (default)')
+    parser.add_argument('--merge-mis-as-ref', action='store_true', 
+                        help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
+    parser.add_argument('-m', '--max-repeat', default=None, type=int,
+                        help='Maximum size a variant to search for repeat motif (default: None)')
     parser.add_argument('--debug', action='store_true', 
                         help='Debug mode')
 
