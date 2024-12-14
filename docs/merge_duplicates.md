@@ -38,7 +38,45 @@ These ensure when 2 alleles are found at the same position, all variants except 
 
 ## How it works
 
-**TL;DR**: To concatenate variant A and variant B, we can right shift B to the end of A's reference allele, and then concatenate their alleles.
+**TL;DR**: To concatenate variant A and variant B, we can right shift B to the end of A's reference allele, and then concatenate their alleles, the concatenated allele is:
+
+$$ Allele_{concat} =  Allele_A + S_B[n:m] + S_B[0:n] $$
+
+where $ Allele_A $ is the REF or ALT allele of variant A to be concatenated, $ S_B $ is the left-trimed indel sequence of variant B, $ m = len(S_B) $, and $ n = [len(REF_A) - 1] \mod m $.
+
+Particularly, for deletions, the above is equivalent to insert the left-trimed REF_B after the first base of REF_A :
+
+$$ REF_{concat} = REF_A[0] + S_B + REF_A[1:len(REF_A)] $$
+
+Examples:
+```
+ref  GGCTAGCTA      (span from 1-9)
+hap1 AAA-A----      (GGCT to AAA + GCTA del)
+hap2 AAA-AGCTAGCTA  (GGCT to AAA + GCTA ins) 
+
+VCF:
+                           hap1   hap2
+var   1   GGCT    AAA      1      1
+del   1   GGCTA   G        1      0
+ins   1   G       GGCTA    0      1
+
+For hap1:
+ref = var_ref[0] + S_del + var_ref[1:4]
+    = G + GCTA + GCT
+    = GGCTAGCT
+alt = var_alt 
+    = AAA
+
+For hap2:
+ref = var_ref
+    = GGCT
+alt = var_alt + S_ins[3:4] + S_ins[0:3]
+    = AAA + A + GCT
+    = AAAAGCT
+Right trim to normalize:
+ref = G
+alt = AAAA
+```
 
 
 ### Proof:
@@ -53,7 +91,7 @@ According to the [left-align algorithm](https://genome.sph.umich.edu/wiki/Varian
 
    This can be done by revert left align
 
-3. **If right shift an indel x bases, the new indel sequence is: s[n+1:m] + s[1:n], where n = x % m, s is the original indel sequence**
+3. **If right shift an indel x bases, the new indel sequence is: s[n:m] + s[0:n], where n = x % m, s is the original indel sequence**
 
    Right shift 1 base: left trim 1 allele, extend the same allele to the right end of ref and alt, for example
 ```
@@ -64,11 +102,11 @@ alt GCCTT
 left aligned G----CCTT  (GCCTT G in VCF, del sequence is CCTT)
 right shift  GC----CTT  (CCTTC C in VCF, del sequence is  CTTC)
 
--> right shift 1 base   =  s -> s[1+1:m] + s[1:1]
--> right shift n bases  =  s -> s[n+1:m] + s[1:n], if n <= m
+-> right shift 1 base   =  s -> s[1:m] + s[0:1]
+-> right shift n bases  =  s -> s[n:m] + s[0:n], if n <= m
 -> right shift m bases  =  s -> s
 -> right shift x bases  =  right shift (x - m) bases, where x >= m
--> right shift x bases  =  s -> s[n+1:m] + s[1:n], where n = x % m
+-> right shift x bases  =  s -> s[n:m] + s[0:n], where n = x % m
 ```
 
 4. **If an indel of length m can right shift longer than its length, then the indel is a tandem repeat, with repeat motif of length M, and m % M == 0**
@@ -124,7 +162,7 @@ Let x = len(var_ref) - 1               (base to right shift)
     s = left-trimmed deletion sequence (i.e., GCTA)
 
 Then, concatednated alleles are:
-ref = var_ref + ( s[n+1:m] + s[1:n] )
+ref = var_ref + ( s[n:m] + s[0:n] )
     = GGCT + A + GCT 
     = GGCTAGCT
 
@@ -137,9 +175,9 @@ ref = G + GCTA + GCT
 Proof:
 if x < m, then 
 n = x % m = x,
-ref = var_ref + ( s[n+1:m] + s[1:n])
-    = s[1:n] + s[n+1:m] + s[1:n]
-    = s + s[1:n]
+ref = var_ref + ( s[n:m] + s[0:n])
+    = s[0:n] + s[n:m] + s[0:n]
+    = s + s[0:n]
     = s + var_ref
 if x > m, then s is tandem repeat and x has at least 1 copy of full repeat motif. As the copy number of tandem repeat in ref will not affect the results, this is equivalent to x < m.
 ```
@@ -164,6 +202,24 @@ Concatenate procedure:
 Usually we need to further normalize the concatenated alleles by right trimming:
 GGCT    AAAAGCT     (right trim GCT)
 G       AAAA        (same as expected output)
+
+In general:
+Let x = len(var_ref) - 1               (base to right shift)
+    m = len(ins),
+    n = x % m,
+    s = left-trimmed ins sequence      (i.e., GCTA)
+
+Then, concatednated alleles are:
+ref = var_ref 
+    = GGCT
+
+alt = var_alt + ( s[n:m] + s[0:n] )
+    = AAA + A + GCT 
+    = AAAAGCT
+
+Right trim:
+ref = G
+alt = AAAA
 ```
 
 Q.E.D
