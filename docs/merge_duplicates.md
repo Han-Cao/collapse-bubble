@@ -232,7 +232,7 @@ Q.E.D
 Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
 
 ```
-(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -k1,1 -k2,2n) | bgzip > output.vcf.gz
+(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1 -k2,2n) | bgzip > output.vcf.gz
 ```
 
 ## Known limitation in the script:
