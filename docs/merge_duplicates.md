@@ -2,7 +2,7 @@
 
 This script `merge_duplicates.py` will perform a two-step process to merge duplicated VCF records and overlapping alleles at the same position:
 
-**Step 1**: Concatenate the alleles at the same position if they are on the same haplotype:
+**Step 1**: Concatenate the alleles at the same position if they are on the same haplotype. This step is similar as the haplotype reconstruction that has been disccused in [vt](https://github.com/atks/vt/issues/16).
 
 ```
 C AA   0|1
@@ -175,13 +175,13 @@ alt = var_alt
 Morever, the concatenated ref allele is also equivalent to inserting the indel sequence s after position 1:
 ref = G + GCTA + GCT
     = GGCTAGCT
+
 Proof:
 if x < m, then 
-n = x % m = x,
+n = x % m = x, and var_ref[1:] = s[0:n]
 ref = var_ref + ( s[n:m] + s[0:n])
-    = s[0:n] + s[n:m] + s[0:n]
-    = s + s[0:n]
-    = s + var_ref
+    = var_ref[0] + s[0:n] + s[n:m] + s[0:n]
+    = var_ref[0] + s + var_ref[1:]
 if x > m, then s is tandem repeat and x has at least 1 copy of full repeat motif. As the copy number of tandem repeat in ref will not affect the results, this is equivalent to x < m.
 ```
 
