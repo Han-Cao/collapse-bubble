@@ -354,14 +354,16 @@ def concat_alleles(var_lst: list[pysam.VariantRecord]) -> tuple[str, str]:
 def check_replacement(ref: str, alt: str, var_add: pysam.VariantRecord) -> None:
     """ Check SNP, MNP, and complex replacement variants """
 
-    # here we assume all replacements are just redundantly called
-    logger.warning(f"Ignore redundant non-indel overlapping:\n" +
-                   f"{var_add.chrom}:{var_add.pos}:{ref}_{alt}\n" +
-                   f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]}") # type: ignore
     ref_add, alt_add = var_add.alleles # type: ignore
     if ref[:len(ref_add)] != ref_add or alt[:len(alt_add)] != alt_add:
-        logger.warning(f"Ignore {var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
-                        "due to conflict with existing variant {ref}:{alt}")
+        logger.warning(f"Identify haplotype conflict between:\n" + 
+                       f"{var_add.chrom}:{var_add.pos}:{ref}_{alt}\n" +
+                       f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} (force this to reference)") # type: ignore
+    else:
+        # here we assume all compatible replacements are just redundantly called
+        logger.warning(f"Ignore redundant non-indel overlapping:\n" +
+                       f"{var_add.chrom}:{var_add.pos}:{ref}_{alt}\n" +
+                       f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]}") # type: ignore
 
 
 def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -> None:
