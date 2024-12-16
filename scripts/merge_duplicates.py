@@ -171,11 +171,16 @@ class DuplicatesDict:
         self.dup_dict[dup_key] = [self.dup_dict[dup_key][0]]
 
     
-    def get_sorted_idx(self) -> list:
+    def get_sorted_idx(self, keep_order: bool) -> list:
         """ Get index of sorted alleles """
 
-        sorted_keys = sorted(self.dup_dict.keys())
-        return [self.dup_dict[k][0] for k in sorted_keys]
+        # keep input order
+        if keep_order:
+            return sorted([x[0] for _, x in self.dup_dict.items()])
+        # sort by alleles
+        else:
+            sorted_keys = sorted(self.dup_dict.keys())
+            return [self.dup_dict[k][0] for k in sorted_keys]
 
 
 
@@ -569,7 +574,7 @@ def update_ac(variant: pysam.VariantRecord) -> pysam.VariantRecord:
 
 def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: pysam.VariantRecord, 
                  hap_indexer: HapIndexer, counter: VariantCounter, concat_method: str, 
-                 mis_as_ref: bool, track: str, max_repeat: int) -> None:
+                 mis_as_ref: bool, track: str, max_repeat: int, keep_order: bool) -> None:
     """ Merge duplicated records and write to output VCF """
 
     # only 1 variant at the previous position
@@ -593,7 +598,7 @@ def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: 
     counter.merge += n_merge
 
 
-    for k in var_dict.get_sorted_idx():
+    for k in var_dict.get_sorted_idx(keep_order):
         out_var = var_dict.var_lst[k]
         out_var = update_ac(out_var)
         outvcf.write(out_var)
@@ -663,7 +668,8 @@ def main(args: argparse.Namespace):
         # process all variants at the previous position
         if cur_var.pos > prev_var.pos:
             process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter,
-                         args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
+                         args.concat, args.merge_mis_as_ref, args.track, 
+                         args.max_repeat, args.keep_order)
             working_var_dict = DuplicatesDict()
         # store variants at the same position
         elif cur_var.pos == prev_var.pos:
@@ -675,7 +681,8 @@ def main(args: argparse.Namespace):
             # end of current chromosome, write all variants on the previous chromosome
             if prev_var.chrom != cur_var.chrom:
                 process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
-                             args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
+                             args.concat, args.merge_mis_as_ref, args.track, 
+                             args.max_repeat, args.keep_order)
                 working_var_dict = DuplicatesDict()
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
@@ -685,7 +692,8 @@ def main(args: argparse.Namespace):
                 
     # process at the end of the VCF
     process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
-                 args.concat, args.merge_mis_as_ref, args.track, args.max_repeat)
+                 args.concat, args.merge_mis_as_ref, args.track, 
+                 args.max_repeat, args.keep_order)
 
     logger.info(f'Read {counter.input} variants')
     logger.info(f'{counter.merge} variants are merged')
@@ -705,12 +713,14 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
     parser.add_argument('-c', '--concat', choices=['position', 'repeat', 'none'], default='position',
                         help='Concatenate variants when they have identical "position" (default) or "repeat" motif, "none" to skip')
+    parser.add_argument('-m', '--max-repeat', default=None, type=int,
+                        help='Maximum size a variant to search for repeat motif (default: None)')
     parser.add_argument('-t', '--track', choices=['ID', 'AT'], default=None,
                         help='Track how variants are merged by "ID", "AT", or disable (default)')
     parser.add_argument('--merge-mis-as-ref', action='store_true', 
                         help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
-    parser.add_argument('-m', '--max-repeat', default=None, type=int,
-                        help='Maximum size a variant to search for repeat motif (default: None)')
+    parser.add_argument('--keep-order', action='store_true',
+                        help='keep the order of variants in the input VCF (default: sort by chr, pos, alleles)')
     parser.add_argument('--debug', action='store_true', 
                         help='Debug mode')
 
