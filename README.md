@@ -71,10 +71,8 @@ python scripts/annotate_var_id.py \
 -i mc.biallele.vcf.gz \
 -o mc.biallele.uniq_id.vcf.gz
 
-# add AC/AN/AF and decompose VCF
 # optional: first drop INFO/AT (useless after decomposition, suggested by cactus)
 bcftools annotate -x INFO/AT -Ou mc.biallele.uniq_id.vcf.gz | \
-bcftools +fill-tags -- -t AC,AN,AF | \
 vcfwave -I 1000 | bgzip -c > mc.biallele.uniq_id.vcfwave.vcf.gz
 
 # normalization and sort, update AC/AN/AF
