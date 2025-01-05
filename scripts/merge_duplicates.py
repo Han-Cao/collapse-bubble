@@ -388,7 +388,7 @@ def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -
         else:
             expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
 
-    if expect_ref_trim != ref_trim:
+    if expect_ref_trim.upper() != ref_trim.upper():
         raise ValueError(f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
                          f"cannot be right shifted to concatenate with {ref_trim}.")
 
