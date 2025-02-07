@@ -164,4 +164,64 @@ Collapse arguments:
 
 ### 3. Duplicates merging:
 
-TODO: I re-write `merge_duplicates.py` and significantly changes its algorithm. Will update the instructions for latest pipeline. For now, please refer to [docs](docs/merge_duplicates.md) to see how it works, or use the previous version [commit dcbb4c8](https://github.com/Han-Cao/collapse-bubble/tree/dcbb4c87ea3a640d166db8b934a5fea6ec67627e).
+After variant decomposition and left alignment, the pangenome VCF can have overlapping variants at the same position (most are SNPs and INDELs):
+
+```
+chr1   100   var1   C   G     1|0
+chr1   100   var2   C   G     0|1
+chr1   100   var3   C   CAA   1|0
+chr1   100   var4   C   CAA   1|0
+```
+In this example:
+- var1 and var2 are duplicated, as they have the same `POS`, `REF`, and `ALT`. This is due to variant decomposition.
+- var1 and var3 / var4 are overlapped on the **first haplotype**, as there are 3 alternative alleles at the same `POS`. This is caused by left-alignment.
+
+`merge_duplicates.py` can clean the duplicated and overlapping variants:
+
+```
+python scripts/merge_duplicates.py \
+-i merged.vcf.gz \
+-o merged.dedup.vcf.gz \
+-c repeat
+```
+
+- It first concatenate overlapping **tandem repeats** using the algorithm described in [docs](docs/merge_duplicates.md). This will concatenate var3,4 to `C CAAAA`
+- After concatenating all overlapping variants, it merge duplicated variants into one record and correctly update the phased genotypes.
+
+Output:
+```
+chr1   100   var1   C   G     1|1
+chr1   100   chr1:100_0   C   CAAAA 1|0
+```
+
+**Warning**: `merge_duplicates.py` can increase the polymorphism of tandem repeats when there are a lot of samples. Using `--max-repeat 50` can avoid SVs to be concatenated. To accurately quantify tandem repeat lenghts, it would be better to run `merge_duplicates.py -c repeat` without any SV merging.
+
+**Note**: `merge_duplicates.py` can concatenate any overlapping variants when `-c position` is used. This method reconstructs the local haplotype and thereby significantly increase the polymorphism, which is not suitable for SV merging. Moreover, it also has more requirements on the input VCF. Please read the [docs](docs/merge_duplicates.md) before using it. It is worthy to note that `merge_duplicates.py -c position` is included in the latest [minigraph-cactus](https://github.com/ComparativeGenomicsToolkit/cactus) pipeline. For now, it is easier to run `merge_duplicates.py` within the `minigraph-cactus` pipeline.
+
+**TODO**: A new SV merging pipeline that concatenates overlapping variants before variant merging will be developed.
+
+**Arguments**:
+```
+usage: merge_duplicates.py [-h] -i VCF -o VCF [-c {position,repeat,none}] [-m MAX_REPEAT] [-t {ID,AT}] [--merge-mis-as-ref] [--keep-order] [--debug]
+
+Merge duplicated variants in phased VCF
+
+options:
+  -h, --help            show this help message and exit
+  -i VCF, --invcf VCF   Input VCF, sorted and phased
+  -o VCF, --outvcf VCF  Output VCF
+  -c {position,repeat,none}, --concat {position,repeat,none}
+                        Concatenate variants when they have identical "position" (default) or "repeat" motif, "none" to skip
+  -m MAX_REPEAT, --max-repeat MAX_REPEAT
+                        Maximum size a variant to search for repeat motif (default: None)
+  -t {ID,AT}, --track {ID,AT}
+                        Track how variants are merged by "ID", "AT", or disable (default)
+  --merge-mis-as-ref    Convert missing to ref when merging missing genotypes with non-missing genotypes
+  --keep-order          keep the order of variants in the input VCF (default: sort by chr, pos, alleles)
+  --debug               Debug mode
+```
+
+## Acknowledgement
+
+- We thank Adam English for [Truvari](https://github.com/ACEnglish/truvari) and for sharing the insightful [script](https://github.com/ACEnglish/truvari/issues/228#issuecomment-2308535253) that inspired `collapse_bubble.py`.
+- We thank Glenn Hickey for valuable suggestions on merging overlapping variants in `merge_duplicates.py`
