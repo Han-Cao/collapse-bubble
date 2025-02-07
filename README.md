@@ -27,7 +27,7 @@ This pipeline uses [Truvari](https://github.com/ACEnglish/truvari)'s API to merg
 
 All scripts have been tested with Python 3.10. Please install the following python modules to run the scripts.
 
-(Note: the script was developed with `truvari 4.2.2`. It has not been tested with the new API in changed in `truvari 5`.)
+(Note: the script was developed with `truvari 4.2.2`. It has not been tested with the new API changed in `truvari 5`.)
 
 ```
 truvari==4.2.2
@@ -194,9 +194,9 @@ chr1   100   var1   C   G     1|1
 chr1   100   chr1:100_0   C   CAAAA 1|0
 ```
 
-**Warning**: `merge_duplicates.py` can increase the polymorphism of tandem repeats when there are a lot of samples. Using `--max-repeat 50` can avoid SVs to be concatenated. To accurately quantify tandem repeat lenghts, it would be better to run `merge_duplicates.py -c repeat` without any SV merging.
+**Warning**: `merge_duplicates.py` can increase the polymorphism of tandem repeats when there are a lot of samples. Using `--max-repeat 50` can avoid SVs to be concatenated. To accurately quantify tandem repeat lenghts, it would be better to run `merge_duplicates.py -c repeat` without merging SVs.
 
-**Note**: `merge_duplicates.py` can concatenate any overlapping variants when `-c position` is used. This method reconstructs the local haplotype and thereby significantly increase the polymorphism, which is not suitable for SV merging. Moreover, it also has more requirements on the input VCF. Please read the [docs](docs/merge_duplicates.md) before using it. It is worthy to note that `merge_duplicates.py -c position` is included in the latest [minigraph-cactus](https://github.com/ComparativeGenomicsToolkit/cactus) pipeline. For now, it is easier to run `merge_duplicates.py` within the `minigraph-cactus` pipeline.
+**Note**: `merge_duplicates.py` can concatenate any overlapping variants when `-c position` is used. This method reconstructs the local haplotype to create a non-overlapping VCF. Howoever, it generates more similar SVs, which is not suitable for SV merging. Moreover, using `-c position` also has more requirements on the input VCF. Please read the [docs](docs/merge_duplicates.md) before using it. It is worthy to note that `merge_duplicates.py -c position` is included in the latest [minigraph-cactus](https://github.com/ComparativeGenomicsToolkit/cactus) pipeline. Please try it if you want to have a non-overlapping VCF after variant decomposition and normalization.
 
 **TODO**: A new SV merging pipeline that concatenates overlapping variants before variant merging will be developed.
 
@@ -224,4 +224,4 @@ options:
 ## Acknowledgement
 
 - We thank Adam English for [Truvari](https://github.com/ACEnglish/truvari) and for sharing the insightful [script](https://github.com/ACEnglish/truvari/issues/228#issuecomment-2308535253) that inspired `collapse_bubble.py`.
-- We thank Glenn Hickey for valuable suggestions on merging overlapping variants in `merge_duplicates.py`
+- We thank Glenn Hickey for valuable suggestions on merging overlapping variants.
