@@ -1,6 +1,6 @@
 # Use `collapse-bubble` to merge `PanGenie` results
 
-This pipeline integrate `collapse-bubble` into the `PanGenie` genotyping pipeline. Please make use you have read the [Pangenie pipeline](https://github.com/eblerjana/genotyping-pipelines/tree/main/prepare-vcf-MC) and downloaded required `PanGenie` scripts.
+This pipeline integrate `collapse-bubble` into the `PanGenie` genotyping pipeline. Please make sure you have read the [Pangenie pipeline](https://github.com/eblerjana/genotyping-pipelines/tree/main/prepare-vcf-MC) and installed required `PanGenie` scripts.
 
 **Important**: This pipeline is under development and may change in the future. Use at your own risk.
 
