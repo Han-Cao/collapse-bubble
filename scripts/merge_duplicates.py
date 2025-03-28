@@ -114,6 +114,10 @@ class DuplicatesDict:
                 motif = find_rep_motif(indel_seq)
                 motif_dict[motif].append(i)
             
+            # the ID of concatenated variants are in format of chr:pos_no.
+            # when there are more than 1 motif in the same position,
+            # we need to generate unique no across different motifs
+            concat_n = 0
             for _, concat_var_idx in motif_dict.items():
                 if len(concat_var_idx) < 2:
                     continue
@@ -122,12 +126,14 @@ class DuplicatesDict:
                                                                       gt_mat[concat_var_idx],
                                                                       hap_indexer,
                                                                       mis_as_ref,
-                                                                      track)
+                                                                      track,
+                                                                      concat_id_start=concat_n)
                 gt_mat[concat_var_idx] = update_gt_mat
-                # concat 2 indels mean result in no variant, make sure append real variant
+                # concat 2 indels with complementary REF and ALT result in no variant, make sure append real variant
                 if len(tmp_vars) > 0:
                     new_vars.extend(tmp_vars)
                     new_vars_gt_lst.append(tmp_gt_mat)
+                    concat_n += len(tmp_vars)
             
             # combine all genotypes
             if len(new_vars_gt_lst) > 0:
@@ -201,7 +207,8 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
                     gt_mat: np.ndarray, 
                     hap_indexer: HapIndexer,
                     mis_as_ref: bool, 
-                    track: str) -> tuple[list[pysam.VariantRecord], np.ndarray, np.ndarray]:
+                    track: str,
+                    concat_id_start: int = 0) -> tuple[list[pysam.VariantRecord], np.ndarray, np.ndarray]:
     """
     Concatenate selected variants and update genotypes
     Genotypes of input variants are updated in-place if input if a view not a copy
@@ -224,7 +231,7 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
     alt_sum_arr = alt_mat.sum(axis=0)
     ret_gt_lst = []
     ret_var_lst = []
-    concat_n = 0
+    concat_n = concat_id_start
     while alt_sum_arr.max() > 1:
         # select the one with the most alt alleles to process
         # this ensure that, if other variants have all 1, no additional alt exist
