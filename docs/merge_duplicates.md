@@ -27,6 +27,14 @@ C AAAA 1|1
 ```
 Here, we get a non-overlapping, deduplicated VCF.
 
+## Table of contents
+
+- [Input requirements](#input-requirements)
+- [How it works](#how-it-works)
+    - [Proof](#proof)
+    - [Demonstration](#demonstration)
+- [Limitations](#limitations)
+
 ## Input requirements
 
 When concatenating phased alleles, it requires that:
@@ -35,6 +43,13 @@ When concatenating phased alleles, it requires that:
 2. The input VCF should be sorted by only chr and position after `bcftools norm`.
 
 These ensure when 2 alleles are found at the same position, all variants except the first one must be left aligned to this position. Therefore, we can concatenate indels to the first variant to reconstruct the original haplotype. This makes it possbible to concatenate alleles without querying reference genome.
+
+### Important note:
+Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
+
+```
+(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1 -k2,2n) | bgzip > output.vcf.gz
+```
 
 ## How it works
 
@@ -228,14 +243,7 @@ alt = AAAA
 Q.E.D
 
 
-## Important note:
-Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
-
-```
-(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1 -k2,2n) | bgzip > output.vcf.gz
-```
-
-## Known limitation in the script:
+## Limitations:
 
 To concatenate alleles, the script will find all alt alleles and concat them together. This is fast as we only need to care about the sum of existing alt alleles. However, it could be time-consuming if we need to perfectly determine whether other haplotypes have reference allele or missing genotype:
 
@@ -252,7 +260,9 @@ To concatenate alleles, the script will find all alt alleles and concat them tog
 - For sample1, we concat 1,4 to get the final 6A insertion. 
 - For sample2, if also consider 1,4, its genotype is `0|0`, but if we consider 2,3, it should be `.|0`.
  
-This means we need to find all possible combinations that can generate the same allele to determine whether the genotypes for non-alt haplotypes are ref or missing. This requires a lot of time when there are many variants to be considered, and most combinations should not affect the final result. Therefore, we currently only check the conbinations that are seen (i.e., 1,4 not 3,4) in existing haplotypes. If you already specify `--merge-mis-as-ref`, this would not be a problem. In this case, the genotypes of concatenated alleles are missing if and only if all existing genotypes are missing:
+This means we need to find all possible combinations that can generate the same allele to determine whether the genotypes for non-alt haplotypes are ref or missing. This requires a lot of time when there are many variants to be considered, and most combinations should not affect the final result. Therefore, we currently only check the conbinations that are seen (i.e., 1,4 not 3,4) in existing haplotypes. 
+
+If you already specify `--merge-mis-as-ref`, this would not be a problem. Because the genotypes of concatenated alleles are missing if and only if all existing genotypes are missing:
 
 ```
               sample1   sample2
