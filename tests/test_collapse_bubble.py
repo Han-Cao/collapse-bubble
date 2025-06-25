@@ -1,7 +1,6 @@
 import pytest
 import subprocess
 import os
-import shutil
 
 import pysam
 import pandas as pd
@@ -17,20 +16,23 @@ OUTPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'output')
 TYPE = ['disjoint']
 
 
-# Clean previous test run and create output directory
-def prepare_outdir() -> None:
-
-    if os.path.exists(OUTPUT_DIR):
-        shutil.rmtree(OUTPUT_DIR)
-    os.makedirs(OUTPUT_DIR)
-
 # Run command
 def run_script(vcf_type: str) -> None:
+
+    invcf = os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz')
+    outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
+    outmap = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt')
+
+    # clean previous test run if exist
+    if os.path.exists(outvcf):
+        os.remove(outvcf)
+
     command = ['python', SCRIPT, 
-               '-i', os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz'), 
-               '-o',  os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz'),
-               '-m',  os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt'),
+               '-i', invcf, 
+               '-o', outvcf,
+               '-m', outmap,
                '--info', 'SVTYPE,SVLEN']
+    
     subprocess.run(command, check=True)
 
 
@@ -38,7 +40,6 @@ def run_script(vcf_type: str) -> None:
 @pytest.mark.order(1)
 @pytest.mark.parametrize("vcf_type", TYPE)
 def test_script_execution(vcf_type: str) -> None:
-    prepare_outdir()
     try:
         run_script(vcf_type)  # This will raise CalledProcessError on failure
         assert True
