@@ -229,6 +229,7 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
         non_mis_hap_idx = None   # if not mis_as_ref, this should not be used
 
     alt_sum_arr = alt_mat.sum(axis=0)
+    alt_sum_arr_raw = alt_sum_arr.copy() # this save the original alt sum before merging
     ret_gt_lst = []
     ret_var_lst = []
     concat_n = concat_id_start
@@ -240,7 +241,7 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
         var_idx = np.where(alt_mat[:, hap_idx])[0]
 
         # concat genotypes
-        new_gt = concat_gt_mat(gt_mat[var_idx], mis_as_ref)
+        new_gt = concat_gt_mat(gt_mat[var_idx], mis_as_ref, alt_sum_arr_raw)
         if mis_as_ref:
             force_ref_idx = (new_gt == -1) & non_mis_hap_idx
             new_gt[force_ref_idx] = 0
@@ -282,15 +283,28 @@ def get_gt_mat(var_lst: list[pysam.VariantRecord]) -> np.ndarray:
     return np.array(gt_mat_lst, dtype=np.int8)
 
 
-def concat_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
+def concat_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool, alt_sum_arr_raw: np.ndarray) -> np.ndarray:
     """ Get concatenated genotypes from a matrix """
 
-    # all 1 -> 1, any 0 -> 0, else -1
+    # all 1 -> 1, any 0 -> 0
+    # when include only 1 and -1, check the alt sum of the original gt_mat
+    # if additional 1 included -> 0, else -1
+    # If different combinations result in the same allele, this can still be correctly handle when merge_dup
+    # Example:
+    #       h1 h2 h3
+    # v1    .  1  1
+    # v2    1  1  .
+    # v3    1  0  0
+    # concat:
+    # v1+v2 0  1  .
+    # v2+v3 1  0  0
     gt_arr = np.empty(gt_mat.shape[1], dtype=np.int8)
     gt_arr.fill(-1)
 
+    # all 1 -> 1
     is_alt = np.all(gt_mat == 1, axis=0)
     if not mis_as_ref:
+        # any 0 -> 0
         is_ref = np.any(gt_mat == 0, axis=0)
     # if mis_as_ref, only all -1 -> -1
     else:
@@ -298,6 +312,9 @@ def concat_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
         is_ref[is_alt] = False
     gt_arr[is_alt] = 1
     gt_arr[is_ref] = 0
+    # if additional 1 included, always be 0
+    alt_sum_arr_cur = (gt_mat == 1).sum(axis=0)
+    gt_arr[alt_sum_arr_raw > alt_sum_arr_cur] = 0
 
     return gt_arr
 
@@ -370,12 +387,12 @@ def check_replacement(ref: str, alt: str, var_add: pysam.VariantRecord) -> None:
 
     ref_add, alt_add = var_add.alleles # type: ignore
     if ref[:len(ref_add)] != ref_add or alt[:len(alt_add)] != alt_add:
-        logger.warning(f"Identify haplotype conflict between:\n" + 
+        logger.warning("Identify haplotype conflict between:\n" + 
                        f"{var_add.chrom}:{var_add.pos}:{ref}_{alt}\n" +
                        f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} (force this to reference)") # type: ignore
     else:
         # here we assume all compatible replacements are just redundantly called
-        logger.warning(f"Ignore redundant non-indel overlapping:\n" +
+        logger.warning("Ignore redundant non-indel overlapping:\n" +
                        f"{var_add.chrom}:{var_add.pos}:{ref}_{alt}\n" +
                        f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]}") # type: ignore
 
@@ -398,8 +415,8 @@ def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -
             expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
 
     if expect_ref_trim != ref_trim:
-        raise ValueError(f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
-                         f"cannot be right shifted to concatenate with {ref_trim}.")
+        raise ValueError(f"Cannot right shift {var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
+                         f"to the 3' end of ref allele {ref_trim}.")
 
 
 def right_shift_indel(seq: str, n: int) -> str:
@@ -503,7 +520,7 @@ def merge_variants(var_lst: list[pysam.VariantRecord], gt_mat: np.ndarray,
 
     # check if multiple alleles on the same haplotype:
     if np.any(np.sum(gt_mat==1, axis=0) > 1):
-        logger.warning(f'More than 1 alleles on the same haplotype for variant: ' +
+        logger.warning('More than 1 alleles on the same haplotype for variant: ' +
                        f'{merged_var.chrom}:{merged_var.pos}:{merged_var.ref}_{merged_var.alts[0]}') # type: ignore
             
 
@@ -633,7 +650,7 @@ def check_vcf(vcf: pysam.VariantFile, n: int) -> None:
         for sample in var.samples.values():
             ploidy = len(sample['GT'])
             if ploidy >= 2 and not sample.phased:
-                raise ValueError(f'Unphased sample is not supported')
+                raise ValueError('Unphased sample is not supported')
 
 
 def main(args: argparse.Namespace):
@@ -725,7 +742,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--max-repeat', default=None, type=int,
                         help='Maximum size a variant to search for repeat motif (default: None)')
     parser.add_argument('-t', '--track', choices=['ID', 'AT'], default=None,
-                        help='Track how variants are merged by "ID", "AT", or disable (default)')
+                        help='Track how variants are merged by "ID" or "AT" (default: None)')
     parser.add_argument('--merge-mis-as-ref', action='store_true', 
                         help='Convert missing to ref when merging missing genotypes with non-missing genotypes')
     parser.add_argument('--keep-order', action='store_true',
