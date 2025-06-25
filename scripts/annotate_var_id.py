@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Annotate and assign unique variant ID for pangenome VCF
-# Last update: 30-Sep-2024
+# Last update: 25-Jun-2025
 # Author: Han Cao
 
 import argparse
@@ -12,6 +12,8 @@ import pysam
 parser = argparse.ArgumentParser(prog='annotate_var_id.py', description='Annotate and assign unique variant ID for pangenome VCF')
 parser.add_argument('-i', '--input', metavar='VCF', help='Input VCF', required=True)
 parser.add_argument('-o', '--output', metavar='VCF', help='Output VCF', required=True)
+parser.add_argument('--suffix-sep', default=None, type=str,
+                    help='Separator between bubble ID and suffix, e.g., "_" for vcfwave processed VCF (default: None)')
 
 
 def get_var_type(record: pysam.VariantRecord) -> str:
@@ -32,7 +34,7 @@ def get_var_type(record: pysam.VariantRecord) -> str:
             return 'COMPLEX'
 
 
-def main(input: str, output: str):
+def main(input: str, output: str, suffix_sep) -> None:
 
     invcf = pysam.VariantFile(input, 'rb')
     header = invcf.header
@@ -42,14 +44,19 @@ def main(input: str, output: str):
     id_dict = defaultdict(int)
 
     for record in invcf:
-        record.info['BUBBLE_ID'] = record.id
+        if suffix_sep is not None:
+            bubble_id = record.id.rsplit(suffix_sep, 1)[0]
+        else:
+            bubble_id = record.id
+
+        record.info['BUBBLE_ID'] = bubble_id
         var_type = get_var_type(record)
 
         # generate new unique ID
         # Format: <Bubble_ID>.<SVTYPE>.<No.>
         # start from 1
-        id_dict[record.id] += 1
-        new_id = record.info['BUBBLE_ID'] + '.' + var_type + '.' + str(id_dict[record.id])
+        id_dict[bubble_id] += 1
+        new_id = bubble_id + '.' + var_type + '.' + str(id_dict[bubble_id])
 
         record.id = new_id
         outvcf.write(record)
@@ -59,4 +66,4 @@ def main(input: str, output: str):
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    main(args.input, args.output)
+    main(args.input, args.output, args.suffix_sep)
