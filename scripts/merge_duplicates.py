@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Merge duplicated variants in phased VCF
-# Last update: 14-Dec-2024
+# Last update: 26-Jun-2025
 # Author: Han Cao
 
 import argparse
@@ -338,7 +338,7 @@ def create_concat_var(var_lst: list[pysam.VariantRecord], gt_lst: list[int],
     elif track == "AT":
         ref_at = ':'.join([var.info['AT'][0] for var in var_lst])
         alt_at = ':'.join([var.info['AT'][1] for var in var_lst])
-        new_var.info['CONCAT'] = ref_at + '_' + alt_at
+        new_var.info['CONCAT'] = ref_at + ',' + alt_at
 
     update_gt_all(new_var, gt_lst)
 
@@ -510,7 +510,7 @@ def merge_variants(var_lst: list[pysam.VariantRecord], gt_mat: np.ndarray,
         elif merge_id == "ID":
             dup_lst.append(var.id)
         elif merge_id == "AT":
-            dup_lst.append(var.info['AT'][0] + '_' + var.info['AT'][1])
+            dup_lst.append(var.info['AT'][0] + ',' + var.info['AT'][1])
 
     if len(dup_lst) > 1:
         merged_var.info['DUP'] = dup_lst[1:]
@@ -550,8 +550,10 @@ def merge_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
 
 # O(n) algorithm from https://stackoverflow.com/questions/6021274
 def find_rep_motif(allele: str) -> str:
-    if not allele:
-        return allele
+    
+    # is_indel ensures there must be a str to check, we don't need to check again
+    # if not allele:
+    #     return allele
 
     nxt = [0]*len(allele)
     for i in range(1, len(nxt)):
@@ -691,28 +693,29 @@ def main(args: argparse.Namespace):
     for cur_var in invcf_iter:
         counter.input += 1
 
-        # process all variants at the previous position
-        if cur_var.pos > prev_var.pos:
-            process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter,
-                         args.concat, args.merge_mis_as_ref, args.track, 
-                         args.max_repeat, args.keep_order)
-            working_var_dict = DuplicatesDict()
-        # store variants at the same position
-        elif cur_var.pos == prev_var.pos:
-            # for the first 2 variants, store both
-            if len(working_var_dict) == 0:
-                working_var_dict.add_variant(prev_var)
-            working_var_dict.add_variant(cur_var)
-        else:
-            # end of current chromosome, write all variants on the previous chromosome
-            if prev_var.chrom != cur_var.chrom:
-                process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
+        # same chromosome
+        if prev_var.chrom == cur_var.chrom:
+            # process all variants at the previous position
+            if cur_var.pos > prev_var.pos:
+                process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter,
                              args.concat, args.merge_mis_as_ref, args.track, 
                              args.max_repeat, args.keep_order)
                 working_var_dict = DuplicatesDict()
+            # store variants at the same position
+            elif cur_var.pos == prev_var.pos:
+                # for the first 2 variants, store both
+                if len(working_var_dict) == 0:
+                    working_var_dict.add_variant(prev_var)
+                working_var_dict.add_variant(cur_var)
             # only unsorted VCF will have cur_pos < prev_pos, report error and exit
             else:
                 raise ValueError('Input VCF is not sorted')
+        else:
+            # end of the previous chromosome, write all variants on it
+            process_dups(outvcf, working_var_dict, prev_var, hap_indexer, counter, 
+                         args.concat, args.merge_mis_as_ref, args.track, 
+                         args.max_repeat, args.keep_order)
+            working_var_dict = DuplicatesDict()
 
         prev_var = cur_var.copy()
                 
