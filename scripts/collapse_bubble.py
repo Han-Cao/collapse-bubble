@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # SV merging within the same bubble
-# Last update: 10-Jun-2025
+# Last update: 25-Jun-2025
 # Author: Han Cao
 
 import logging
@@ -75,6 +75,8 @@ def parse_vcf(vcf: pysam.VariantFile, chr: str, min_len: int) -> dict:
     logger = logging.getLogger(__name__)
     # dict to store SVs
     # bubble_id -> {'id': [], 'type': []}
+    # TODO: this assume no inter-chr bubbles, which is safe for MC output
+    # When generalizing this in the future, need to consider process bubbles on different chr
     bubble_dict = {}
 
     vcf_iter = get_vcf_iter(vcf, chr)
@@ -290,10 +292,12 @@ def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
 
     if 'TYPE' not in header.info:
         header.add_line('##INFO=<ID=TYPE,Number=A,Type=String,Description="Type of variant">')
-    
-    header.add_line('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">')
+    if 'SVTYPE' not in header.info:
+        header.add_line('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">')
+    if 'SVLEN' not in header.info:
+        header.add_line('##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">')
+
     header.add_line('##INFO=<ID=REFLEN,Number=1,Type=Integer,Description="Length of REF allele">')
-    header.add_line('##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">')
     header.add_line('##INFO=<ID=ID_LIST,Number=.,Type=String,Description="List of SVs collapsed into this SV">')
 
     return header
