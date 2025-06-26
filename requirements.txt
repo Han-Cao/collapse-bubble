@@ -1,0 +1,4 @@
+truvari==4.2.2
+pysam
+pandas
+numpy

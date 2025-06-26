@@ -1,1 +1,4 @@
-test/
+working/
+__pycache__/
+.coverage
+coverage.xml
