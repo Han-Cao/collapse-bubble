@@ -23,11 +23,14 @@ def run_script(vcf_type: str) -> None:
     outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
     outmap = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt')
 
+    # create output dir if not exist
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
     # clean previous test run if exist
     if os.path.exists(outvcf):
         os.remove(outvcf)
 
-    command = ['python', SCRIPT, 
+    command = [SCRIPT, 
                '-i', invcf, 
                '-o', outvcf,
                '-m', outmap,

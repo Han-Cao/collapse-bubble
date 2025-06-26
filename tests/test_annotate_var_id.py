@@ -19,11 +19,14 @@ def run_script(vcf_type: str) -> None:
     invcf = os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz')
     outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
 
+    # create output dir if not exist
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
     # clean previous test run if exist
     if os.path.exists(outvcf):
         os.remove(outvcf)
 
-    command = ['python', SCRIPT, '-i', invcf, '-o',  outvcf]
+    command = [SCRIPT, '-i', invcf, '-o',  outvcf]
     
     if vcf_type == 'wave':
         command += ['--suffix-sep', '_']
