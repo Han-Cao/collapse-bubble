@@ -179,13 +179,14 @@ def mac(variant: pysam.VariantRecord) -> int:
     return min(alt_count, ref_count)
 
 
-def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> dict:
+def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> tuple[dict, list]:
     """
     Collapse SVs within the same bubble
-    Return the map from original SV ID to collapsed SV ID
+    Return the matching results 
     """
 
-    id_map = {} # SV ID -> Collapsed SV ID
+    match_map = {} # SV ID -> {Collapsed SV ID, Matching stats}
+    conflict_lst = [] # list of conflicting SVs {'Variant_ID', 'Collapse_ID'}
     collapsed_sv = defaultdict(list) # Collapsed SV ID -> list of SV records
 
     # start from the most frequent SVs
@@ -193,7 +194,7 @@ def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> dict:
     while len(var_remain) > 0:
         collapse_var = var_remain.pop(0)
         # always include itself
-        id_map[collapse_var.id] = collapse_var.id
+        match_map[collapse_var.id] = {'Collapse_ID': collapse_var.id}
         collapsed_sv[collapse_var.id].append(collapse_var)
 
         drop_var = []
@@ -202,33 +203,45 @@ def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> dict:
             res_match = matcher.build_match(collapse_var, other_var, skip_gt=True, short_circuit=True)
             if res_match.state:
                 # check haplotype consistency against all SVs already collapsed
+                # TODO: this can speed up by first merging genotypes and check all genotypes at once
+                # To achieve this, we have to do SV merging and genotype merging in one loop
+                # Will work on this if run time is an issue
                 flag_conflict = False
                 for check_var in collapsed_sv[collapse_var.id]:
                     if hap_conflict(check_var, other_var):
                         flag_conflict = True
                         break
                 if flag_conflict:
+                    conflict_lst.append({'Variant_ID': other_var.id, 'Collapse_ID': collapse_var.id})
                     continue
 
                 # merge SVs
-                id_map[other_var.id] = collapse_var.id
+                match_map[other_var.id] = {'Collapse_ID': collapse_var.id,
+                                           'PctSeqSimilarity': res_match.seqsim,
+                                           'PctSizeSimilarity': res_match.sizesim,
+                                           'PctRecOverlap': res_match.ovlpct,
+                                           'SizeDiff': res_match.sizediff,
+                                           'StartDistance': res_match.st_dist,
+                                           'EndDistance': res_match.ed_dist,
+                                           'TruScore': res_match.score
+                                           }
                 collapsed_sv[collapse_var.id].append(other_var)
                 drop_var.append(other_var)
         
         var_remain = [x for x in var_remain if x not in drop_var]
            
-    return id_map
+    return match_map, conflict_lst
 
 
-def get_variant_info(variant: pysam.VariantRecord, collapse_id: str, info_lst: list) -> dict:
+def get_variant_info(variant: pysam.VariantRecord, res_match_dict: dict, info_lst: list) -> dict:
     """ Save variant info into dict """
 
     output = {'CHROM': variant.chrom,
               'POS': variant.pos,
               'Bubble_ID': variant.info['BUBBLE_ID'],
               'Variant_ID': variant.id,
-              'Collapse_ID': collapse_id
             }
+    output.update(res_match_dict)
 
     if len(info_lst) > 0:
         for tag in info_lst:
@@ -244,11 +257,12 @@ def get_variant_info(variant: pysam.VariantRecord, collapse_id: str, info_lst: l
 def collapse_vcf(vcf: pysam.TabixIterator, 
                  matcher: truvari.Matcher, 
                  bubble_dict: dict, 
-                 info_lst: list) -> pd.DataFrame:
+                 info_lst: list) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Collapse bubbles in the VCF """
     
     working_bubbles = defaultdict(list) # bubble_id -> sv_id
     variant_map = []
+    conflict_map = []
 
     for variant in vcf:
         bubble_id = variant.info['BUBBLE_ID']
@@ -268,7 +282,8 @@ def collapse_vcf(vcf: pysam.TabixIterator,
         n_total = len(bubble_dict[bubble_id]['id'])
 
         if n_working == n_total:
-            bubble_map = collapse_bubble(working_bubbles[bubble_id], matcher)
+            bubble_map, conflict_lst = collapse_bubble(working_bubbles[bubble_id], matcher)
+            conflict_map += conflict_lst
             for sv in working_bubbles[bubble_id]:
                 variant_map.append(get_variant_info(sv, bubble_map[sv.id], info_lst))
             # free memory
@@ -278,13 +293,14 @@ def collapse_vcf(vcf: pysam.TabixIterator,
     assert len(working_bubbles) == 0
 
     # convert to dataframe, remove SVs will not be merged
+    df_conflict = pd.DataFrame(conflict_map)
     df_collapse = pd.DataFrame.from_dict(variant_map)
     sv_counts = df_collapse.value_counts('Collapse_ID')
     keep_sv = sv_counts[sv_counts > 1].index
     df_collapse = df_collapse.loc[df_collapse['Collapse_ID'].isin(keep_sv)].reset_index(drop=True)
 
     # create dataframe
-    return df_collapse
+    return df_collapse, df_conflict
 
 
 def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
@@ -446,12 +462,18 @@ def main(args: argparse.Namespace):
     invcf_iter = get_vcf_iter(invcf, args.chr)
     info_lst = [] if args.info is None else args.info.split(',')
 
-    df_collapse = collapse_vcf(invcf_iter, matcher, bubble_dict, info_lst)
+    df_collapse, df_conflict = collapse_vcf(invcf_iter, matcher, bubble_dict, info_lst)
     logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
+    logger.info(f'{len(df_conflict)} SV pairs are collapsed due to haplotype conflict')
 
-    # write collapse map
-    df_collapse.to_csv(args.map, sep='\t', index=False)
-    logger.info(f'Write collapse map to {args.map}')
+    # write collapse and conflict map
+    file_out_collapse = f'{args.map}.collapse.txt'
+    file_out_conflict = f'{args.map}.conflict.txt'
+
+    df_collapse.to_csv(file_out_collapse, sep='\t', index=False)
+    logger.info(f'Write collapse map to {file_out_collapse}')
+    df_conflict.to_csv(file_out_conflict, sep='\t', index=False)
+    logger.info(f'Write conflict map to {file_out_conflict}')
 
     # write output VCF
     outvcf = pysam.VariantFile(args.outvcf, 'w', header=new_header)
@@ -464,20 +486,32 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='collapse_bubble.py', description='Collapse biallelic SVs within the same bubble in VCF')
+    parser = argparse.ArgumentParser(prog='collapse_bubble.py', 
+                                   description='Collapse biallelic SVs within the same bubble in VCF')
+
     io_arg = parser.add_argument_group('Input / Output arguments')
-    io_arg.add_argument('-i', '--invcf', metavar='VCF', help='Input VCF', required=True)
-    io_arg.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
-    io_arg.add_argument('-m', '--map', metavar='TSV', help='Write SV mapping table to this file. Default: None', type=str, required=True)
-    io_arg.add_argument('--chr', metavar='CHR', help='chromosome to work on. Default: all', type=str, default=None)
-    io_arg.add_argument('--info', metavar='TAG', help='Comma-separated INFO/TAG list to include in the output map. Default: None', type=str, default=None)
+    io_arg.add_argument('-i', '--invcf', metavar='VCF', required=True, 
+                       help='Input VCF')
+    io_arg.add_argument('-o', '--outvcf', metavar='VCF', required=True, 
+                       help='Output VCF')
+    io_arg.add_argument('-m', '--map', metavar='PREFIX', type=str, required=True,
+                       help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
+    io_arg.add_argument('--chr', metavar='CHR', type=str, default=None,
+                       help='chromosome to work on. Default: all')
+    io_arg.add_argument('--info', metavar='TAG', type=str, default=None,
+                       help='Comma-separated INFO/TAG list to include in the output map. Default: None')
 
     collapse_arg = parser.add_argument_group('Collapse arguments')
-    collapse_arg.add_argument('-l', '--min-len', metavar='50', help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: 50', type=int, default=50)
-    collapse_arg.add_argument('-r', '--refdist', metavar='100', help='Max reference location distance. Default: 100', type=int, default=100)
-    collapse_arg.add_argument('-p', '--pctseq', metavar='0.9', help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: 0.9', type=float, default=0.9)
-    collapse_arg.add_argument('-P', '--pctsize', metavar='0.9', help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: 0.9', type=float, default=0.9)
-    collapse_arg.add_argument('-O', '--pctovl', metavar='0.9', help='Min pct reciprocal overlap. Default: 0.9', type=float, default=0.9)
-
+    collapse_arg.add_argument('-l', '--min-len', metavar='50', type=int, default=50,
+                             help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: 50')
+    collapse_arg.add_argument('-r', '--refdist', metavar='100', type=int, default=100,
+                             help='Max reference location distance. Default: 100')
+    collapse_arg.add_argument('-p', '--pctseq', metavar='0.9', type=float, default=0.9,
+                             help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: 0.9')
+    collapse_arg.add_argument('-P', '--pctsize', metavar='0.9', type=float, default=0.9,
+                             help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: 0.9')
+    collapse_arg.add_argument('-O', '--pctovl', metavar='0.9', type=float, default=0.9,
+                             help='Min pct reciprocal overlap. Default: 0.9')
+    
     args = parser.parse_args()
     main(args)

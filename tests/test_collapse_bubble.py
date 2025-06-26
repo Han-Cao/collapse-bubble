@@ -21,7 +21,7 @@ def run_script(vcf_type: str) -> None:
 
     invcf = os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz')
     outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
-    outmap = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt')
+    outmap = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping')
 
     # create output dir if not exist
     if not os.path.exists(OUTPUT_DIR):
@@ -76,7 +76,7 @@ def vcf2np(vcf: pysam.VariantFile) -> tuple:
 def test_validate_output(vcf_type: str) -> None:
     file_invcf = os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz')
     file_outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
-    file_mapping = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt')
+    file_mapping = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.collapse.txt')
 
     invcf = pysam.VariantFile(file_invcf, 'rb')
     outvcf = pysam.VariantFile(file_outvcf, 'rb')
@@ -139,6 +139,7 @@ def test_validate_output(vcf_type: str) -> None:
     invcf.close()
     outvcf.close()
 
+
 # Compare output files with truth
 @pytest.mark.order(3)
 @pytest.mark.parametrize("vcf_type", TYPE)
@@ -146,18 +147,23 @@ def test_output(vcf_type: str) -> None:
 
     # Get truth and test files for this suffix
     file_truth_vcf = os.path.join(TRUTH_DIR, vcf_type + '.output.vcf.gz')
-    file_truth_mapping = os.path.join(TRUTH_DIR, vcf_type + '.output.mapping.txt')
+    file_truth_collapse = os.path.join(TRUTH_DIR, vcf_type + '.output.mapping.collapse.txt')
+    file_truth_conflict = os.path.join(TRUTH_DIR, vcf_type + '.output.mapping.conflict.txt')
     file_output_vcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
-    file_output_mapping = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.txt')
+    file_output_collapse = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.collapse.txt')
+    file_output_confilict = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.conflict.txt')
 
     # Read files
     truth_vcf = pysam.VariantFile(file_truth_vcf, 'rb')
-    df_mapping_truth = pd.read_csv(file_truth_mapping, sep='\t')
+    df_collapse_truth = pd.read_csv(file_truth_collapse, sep='\t')
+    df_confilict_truth = pd.read_csv(file_truth_conflict, sep='\t')
     output_vcf = pysam.VariantFile(file_output_vcf, 'rb')
-    df_mapping_output = pd.read_csv(file_output_mapping, sep='\t')
+    df_collapse_output = pd.read_csv(file_output_collapse, sep='\t')
+    df_confilict_output = pd.read_csv(file_output_confilict, sep='\t')
 
     # compare mapping files
-    assert df_mapping_truth.equals(df_mapping_output), f"Mapping mismatch for VCF: {vcf_type}"
+    assert df_collapse_truth.equals(df_collapse_output), f"Collapse mapping mismatch for VCF: {vcf_type}"
+    assert df_confilict_truth.equals(df_confilict_output), f"Conflict mapping mismatch for VCF: {vcf_type}"
 
     # Compare header
     for truth_header, output_header in zip(truth_vcf.header.records, output_vcf.header.records):
@@ -175,4 +181,5 @@ def test_output(vcf_type: str) -> None:
 
     # Clean up
     os.remove(file_output_vcf)
-    os.remove(file_output_mapping)
+    os.remove(file_output_collapse)
+    os.remove(file_output_confilict)
