@@ -179,7 +179,7 @@ def mac(variant: pysam.VariantRecord) -> int:
     return min(alt_count, ref_count)
 
 
-def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> tuple[dict, list]:
+def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
     """
     Collapse SVs within the same bubble
     Return the matching results 
@@ -200,7 +200,7 @@ def collapse_bubble(var_lst: list, matcher: truvari.Matcher) -> tuple[dict, list
         drop_var = []
         # SV comparison
         for other_var in var_remain:
-            res_match = matcher.build_match(collapse_var, other_var, skip_gt=True, short_circuit=True)
+            res_match = collapse_var.match(other_var)
             if res_match.state:
                 # check haplotype consistency against all SVs already collapsed
                 # TODO: this can speed up by first merging genotypes and check all genotypes at once
@@ -254,8 +254,7 @@ def get_variant_info(variant: pysam.VariantRecord, res_match_dict: dict, info_ls
     return output
 
 
-def collapse_vcf(vcf: pysam.TabixIterator, 
-                 matcher: truvari.Matcher, 
+def collapse_vcf(vcf: truvari.VariantFile, 
                  bubble_dict: dict, 
                  info_lst: list) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Collapse bubbles in the VCF """
@@ -282,7 +281,7 @@ def collapse_vcf(vcf: pysam.TabixIterator,
         n_total = len(bubble_dict[bubble_id]['id'])
 
         if n_working == n_total:
-            bubble_map, conflict_lst = collapse_bubble(working_bubbles[bubble_id], matcher)
+            bubble_map, conflict_lst = collapse_bubble(working_bubbles[bubble_id])
             conflict_map += conflict_lst
             for sv in working_bubbles[bubble_id]:
                 variant_map.append(get_variant_info(sv, bubble_map[sv.id], info_lst))
@@ -443,26 +442,29 @@ def main(args: argparse.Namespace):
                         datefmt='%Y-%m-%d %H:%M:%S')
 
     logger = logging.getLogger(__name__)
+
     # set up matcher
-    matcher = truvari.Matcher()
-    matcher.params.typeignore = False
-    matcher.params.refdist = args.refdist
-    matcher.params.pctseq = args.pctseq
-    matcher.params.pctsize = args.pctsize
-    matcher.params.pctovl = args.pctovl
+    p = truvari.VariantParams(refdist=args.refdist,
+                              pctseq=args.pctseq,
+                              pctsize=args.pctsize,
+                              pctovl=args.pctovl,
+                              no_roll=True, # In Truvari 5.3.0, no_roll=True enables rolling...
+                              typeignore=False,
+                              short_circuit=True,
+                              skip_gt=True)
     logger.info(f'Setup Truvari Matcher: refdist={args.refdist}, pctseq={args.pctseq}, pctsize={args.pctsize}, pctovl={args.pctovl}')
 
     # parse input VCF
     logger.info(f'Read input VCF: {args.invcf}')
-    invcf = pysam.VariantFile(args.invcf, 'rb')
-    bubble_dict = parse_vcf(invcf, args.chr, args.min_len)
+    invcf = truvari.VariantFile(args.invcf, 'rb', params=p)
     new_header = add_header(invcf.header)
+    bubble_dict = parse_vcf(invcf, args.chr, args.min_len)
 
-    # collapse VCF
+    # collapse VCF   
     invcf_iter = get_vcf_iter(invcf, args.chr)
     info_lst = [] if args.info is None else args.info.split(',')
 
-    df_collapse, df_conflict = collapse_vcf(invcf_iter, matcher, bubble_dict, info_lst)
+    df_collapse, df_conflict = collapse_vcf(invcf_iter, bubble_dict, info_lst)
     logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
     logger.info(f'{len(df_conflict)} SV pairs are collapsed due to haplotype conflict')
 
@@ -476,7 +478,7 @@ def main(args: argparse.Namespace):
     logger.info(f'Write conflict map to {file_out_conflict}')
 
     # write output VCF
-    outvcf = pysam.VariantFile(args.outvcf, 'w', header=new_header)
+    outvcf = truvari.VariantFile(args.outvcf, 'w', header=new_header)
 
     write_outvcf(invcf, outvcf, df_collapse, args.chr, args.min_len)
     logger.info(f'Write output VCF to {args.outvcf}')
