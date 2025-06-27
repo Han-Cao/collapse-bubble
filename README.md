@@ -30,10 +30,8 @@ This pipeline uses [Truvari](https://github.com/ACEnglish/truvari)'s API to merg
 
 All scripts have been tested with Python 3.10. Please install the following python modules to run the scripts.
 
-(Note: the script was developed with `truvari 4.2.2`. Currently, it does not work with the new API introduced in `truvari 5`.)
-
 ```
-truvari==4.2.2
+truvari==5.3.0
 pysam
 pandas
 numpy
