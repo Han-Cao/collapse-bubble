@@ -210,9 +210,9 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
                 for check_var in collapsed_sv[collapse_var.id]:
                     if hap_conflict(check_var, other_var):
                         flag_conflict = True
+                        conflict_lst.append({'Variant1': other_var.id, 'Variant2': check_var.id, 'Collapse_ID': collapse_var.id})
                         break
                 if flag_conflict:
-                    conflict_lst.append({'Variant_ID': other_var.id, 'Collapse_ID': collapse_var.id})
                     continue
 
                 # merge SVs
@@ -466,7 +466,7 @@ def main(args: argparse.Namespace):
 
     df_collapse, df_conflict = collapse_vcf(invcf_iter, bubble_dict, info_lst)
     logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
-    logger.info(f'{len(df_conflict)} SV pairs are collapsed due to haplotype conflict')
+    logger.info(f'{len(df_conflict)} SV pairs are not collapsed due to haplotype conflict')
 
     # write collapse and conflict map
     file_out_collapse = f'{args.map}.collapse.txt'
