@@ -323,6 +323,20 @@ GT_DICT = {0: 0,
            -1: None}
 
 
+def update_gt_all(var: pysam.VariantRecord, gt_lst: list[int], phased: bool=True):
+    """ In-place update genotypes from a list """
+
+    # update genotypes
+    hap_idx = 0
+    for sample in var.samples.values():
+        ploidy = len(sample['GT'])
+        new_gt = gt_lst[hap_idx: hap_idx + ploidy]
+        new_gt = [GT_DICT[x] for x in new_gt]
+        sample['GT'] = tuple(new_gt)
+        sample.phased = phased
+        hap_idx += ploidy
+
+
 def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam.VariantRecord:
     """ Merge genotypes from list of SVs """
 
@@ -350,32 +364,29 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam
     # for one haplotype, maximum one SV
     if has_var_arr.sum(axis=0).max() > 1:
         logger = logging.getLogger(__name__)
-        logger.warning(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
+        logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
+        raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
+    # TODO: when extending to overlapping bubbles, this may not true, need testing
     if (merge_has_var & merge_missing).any():
         logger = logging.getLogger(__name__)
-        logger.warning(f'Inconsistent genotypes (. vs 1) on the same haplotype, collapse SV ID: {var_collapse.id}')
+        logger.warning(f'{var_collapse.id} has inconsistent genotypes (. vs 1) on the same haplotype after collapsing')
     
     # update genotypes
-    # TODO: use update_gt_all, can support any ploidy
-    hap_idx = 0
-    merge_gt = merge_gt.tolist()
-    for sample in var_collapse.samples.values():
-        ploidy = len(sample['GT'])
-        if ploidy == 1:
-            sample['GT'] = (GT_DICT[merge_gt[hap_idx]],)
-            hap_idx += 1
-        elif ploidy == 2:
-            sample['GT'] = (GT_DICT[merge_gt[hap_idx]], GT_DICT[merge_gt[hap_idx+1]])
-            sample.phased = True # keep the phase
-            hap_idx += 2
-        else:
-            raise ValueError('Ploidy > 2 not supported')
+    update_gt_all(var_collapse, merge_gt)
+
+    # update AC, AN, AF
+    ac = int(np.sum(merge_has_var))
+    an = int(np.sum(~merge_missing))
+    af = float(ac / an) if an > 0 else None
+
+    var_collapse.info['AC'] = (ac, )
+    var_collapse.info['AN'] = an
+    var_collapse.info['AF'] = (af, )
     
     return var_collapse
 
 
-# TODO: we should update AC, AN, AF of merged VCF
 def write_outvcf(invcf: pysam.VariantFile, outvcf: pysam.VariantFile,
                  df_collapse: pd.DataFrame, chr: str, min_len: int) -> None:
     """ Convert SVs and write to output VCF """
