@@ -174,7 +174,6 @@ class BubbleClusters:
             del self.clusters[c_id]
 
 
-
 def get_variant_type(variant: pysam.VariantRecord, min_sv_len: int, sv_only: bool=True) -> str:
     """ Return variant type """
 
@@ -318,39 +317,15 @@ def mac(variant: pysam.VariantRecord) -> int:
     return min(alt_count, ref_count)
 
 
-def svlen(variant: pysam.VariantRecord) -> int:
-    if isinstance(variant.info['SVLEN'], tuple):
-        return variant.info['SVLEN'][0]
-    else:
-        return variant.info['SVLEN']
-
-
-def sorted_variant_idx(var_lst: list[pysam.VariantRecord]) -> list[int]:
-    """ 
-    Return sorted index of variants. 
-    Sort by MAC (descending), then abs(SVLEN - SVLEN_median) (ascending) 
-    """
-
-    arr_mac = np.array([mac(var) for var in var_lst])
-    arr_svlen = np.array([svlen(var) for var in var_lst])
-    arr_svlen_dist = np.abs(arr_svlen - np.median(arr_svlen))
-
-    return np.lexsort((arr_svlen_dist, -arr_mac)).tolist()
-
-
 def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
-    """
-    Collapse SVs within the same bubble
-    Return the matching results 
-    """
+    """ Collapse SVs within the same cluster, return the matching results """
 
     match_map = {} # SV ID -> {Collapsed SV ID, Matching stats}
     conflict_lst = [] # list of conflicting SVs {'Variant_ID', 'Collapse_ID'}
     collapsed_sv = defaultdict(list) # Collapsed SV ID -> list of SV records
 
     # start from the most frequent SVs
-    sorted_idx = sorted_variant_idx(var_lst)
-    var_remain = [var_lst[idx] for idx in sorted_idx]
+    var_remain = sorted(var_lst, key=mac, reverse=True)
     while len(var_remain) > 0:
         collapse_var = var_remain.pop(0)
         # always include itself
@@ -452,7 +427,6 @@ def collapse_vcf(vcf: truvari.VariantFile,
         n_total = len(cluster_var_ids)
 
         if n_working == n_total:
-            
             cluster_map, conflict_lst = collapse_bubble(working_clusters[cluster_id])
             conflict_map += conflict_lst
             
@@ -464,8 +438,7 @@ def collapse_vcf(vcf: truvari.VariantFile,
             del working_clusters[cluster_id]
     
     # If everthing works well, all clusters should be removed from working_clusters
-    assert len(working_clusters) == 0, \
-        f'{len(working_clusters)} clusters are not processed, e.g., {list(working_clusters.keys())[0:5]}'
+    assert len(working_clusters) == 0
 
     # convert to dataframe, remove SVs will not be merged
     df_conflict = pd.DataFrame(conflict_map)
