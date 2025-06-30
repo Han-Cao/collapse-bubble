@@ -318,6 +318,26 @@ def mac(variant: pysam.VariantRecord) -> int:
     return min(alt_count, ref_count)
 
 
+def svlen(variant: pysam.VariantRecord) -> int:
+    if isinstance(variant.info['SVLEN'], tuple):
+        return variant.info['SVLEN'][0]
+    else:
+        return variant.info['SVLEN']
+
+
+def sorted_variant_idx(var_lst: list[pysam.VariantRecord]) -> list[int]:
+    """ 
+    Return sorted index of variants. 
+    Sort by MAC (descending), then abs(SVLEN - SVLEN_median) (ascending) 
+    """
+
+    arr_mac = np.array([mac(var) for var in var_lst])
+    arr_svlen = np.array([svlen(var) for var in var_lst])
+    arr_svlen_dist = np.abs(arr_svlen - np.median(arr_svlen))
+
+    return np.lexsort((arr_svlen_dist, -arr_mac)).tolist()
+
+
 def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
     """
     Collapse SVs within the same bubble
@@ -329,7 +349,8 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
     collapsed_sv = defaultdict(list) # Collapsed SV ID -> list of SV records
 
     # start from the most frequent SVs
-    var_remain = sorted(var_lst, key=mac, reverse=True)
+    sorted_idx = sorted_variant_idx(var_lst)
+    var_remain = [var_lst[idx] for idx in sorted_idx]
     while len(var_remain) > 0:
         collapse_var = var_remain.pop(0)
         # always include itself
@@ -461,9 +482,9 @@ def add_header(header: pysam.VariantHeader) -> pysam.VariantHeader:
     """ Add required INFO to header  """
 
     if 'TYPE' not in header.info:
-        header.add_line('##INFO=<ID=TYPE,Number=A,Type=String,Description="Type of variant">')
+        header.add_line('##INFO=<ID=TYPE,Number=.,Type=String,Description="Type of variant">')
     if 'SVTYPE' not in header.info:
-        header.add_line('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">')
+        header.add_line('##INFO=<ID=SVTYPE,Number=.,Type=String,Description="Type of structural variant">')
     if 'SVLEN' not in header.info:
         header.add_line('##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">')
 
