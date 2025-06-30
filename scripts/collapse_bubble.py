@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-# SV merging within the same bubble
-# Last update: 25-Jun-2025
+# SV merging for pangenome VCF
+# Last update: 30-Jun-2025
 # Author: Han Cao
 
 import logging
@@ -12,6 +12,167 @@ import pysam
 import truvari
 import numpy as np
 import pandas as pd
+
+
+class BubbleClusters:
+    """ Clusters of bubbles overlapping with the same tandem repeat """
+
+    def __init__(self) -> None:
+
+        self.bubbles = {} # bubble_id -> {'id': [var_ids], 'svtype': [var_svtypes], 'cluster': cluster_id}
+        self.clusters = defaultdict(set) # cluster_id -> set of bubble_ids
+        self.cluster_vars = defaultdict(list) # cluster_id -> list of var_ids
+        self.overlaps = defaultdict(set) # bubble_id -> set of overlapping bubbles (self excluded)
+        
+        self._chr = None # current chr
+        self._pos = 0 # current position
+        self._pos_bubbles = set() # all bubbles in the current position
+
+
+    def get_bubble_cluster(self, bubble_id: str) -> int:
+        """ Get cluster id for bubble """
+
+        if bubble_id in self.bubbles:
+            return self.bubbles[bubble_id]['cluster']
+        else:
+            return None
+    
+
+    def get_cluster_variants(self, cluster_id: int) -> list:
+        """ Get variants in a cluster """
+
+        return self.cluster_vars[cluster_id]
+     
+
+    def get_svtype(self, variant: pysam.VariantRecord) -> str:
+        """ Get SVTYPE of a variant """
+
+        bubble_id = get_bubble_ids(variant)[0]
+        if variant.id in self.bubbles[bubble_id]['id']:
+            idx = self.bubbles[bubble_id]['id'].index(variant.id)
+        # non-SV are not included in self.bubbles, return None
+        else:
+            return None
+        
+        return self.bubbles[bubble_id]['svtype'][idx]
+    
+
+    def _update_overlap(self) -> None:
+        """ Update overlaps after position change """
+
+        for b1 in self._pos_bubbles:
+            for b2 in self._pos_bubbles:
+                if b1 != b2:
+                    self.overlaps[b1].add(b2)
+    
+    
+    def add_variant(self, variant: pysam.VariantRecord, svtype: str) -> None:
+        """ Add variant to bubble and check for overlaps """
+
+        # get bubble id
+        bubble_ids = get_bubble_ids(variant)
+        
+        # collect bubbles at the same position
+        if variant.pos == self._pos and variant.chrom == self._chr:
+            self._pos_bubbles.update(bubble_ids)
+
+        # all variants at the previous position has been processed
+        else:
+            # update overlaps 
+            self._update_overlap()
+            # update position
+            self._chr = variant.chrom
+            self._pos = variant.pos
+            self._pos_bubbles = set(bubble_ids)
+        
+        # skip non-SV ensures bubbles without any SV not in self.bubbles
+        if svtype is None:
+            return
+        
+        # add SV to bubble
+        # Note: concatenated variants belong to all the original bubbles
+        for b_id in bubble_ids:
+            if b_id not in self.bubbles:
+                self.bubbles[b_id] = {'id': [variant.id], 'svtype': [svtype], 'cluster': None}
+            else:
+                # check unique id
+                if variant.id in self.bubbles[b_id]['id']:
+                    raise ValueError(f'Duplicate variant ID {variant.id} in bubble {b_id}')
+                self.bubbles[b_id]['id'].append(variant.id)
+                self.bubbles[b_id]['svtype'].append(svtype)
+
+    
+    def cluster_bubbles(self) -> None:
+        """ Cluster bubbles """
+
+        cluster_id = 0
+        for b_id in self.bubbles.keys():
+
+            # find overlap bubbles with SVs
+            overlap_bubbles = [x for x in self.overlaps[b_id] if x in self.bubbles]
+            
+            # singleton bubble
+            if len(overlap_bubbles) == 0:
+                self.bubbles[b_id]['cluster'] = cluster_id
+                self.clusters[cluster_id].add(b_id)
+                cluster_id += 1
+            
+            # multiple bubble cluster
+            else:
+                # find if any bubble already clustered
+                exist_cluster = []
+                cluster_bubbles = [b_id] + overlap_bubbles
+                for id in cluster_bubbles:
+                    if self.bubbles[id]['cluster'] is not None:
+                        exist_cluster.append(self.bubbles[id]['cluster'])
+
+                # create a new cluster
+                unique_cluster = list(set(exist_cluster))
+                if len(unique_cluster) == 0:
+                    for id in cluster_bubbles:
+                        self.bubbles[id]['cluster'] = cluster_id
+                    self.clusters[cluster_id].update(cluster_bubbles)
+                    cluster_id += 1
+                
+                # add to existing cluster
+                else:
+                    assert len(unique_cluster) == 1
+                    for id in cluster_bubbles:
+                        self.bubbles[id]['cluster'] = unique_cluster[0]
+                    self.clusters[unique_cluster[0]].update(cluster_bubbles)
+        
+        # test only: check all bubbles have been clustered
+        for b_id in self.bubbles.keys():
+            assert self.bubbles[b_id]['cluster'] is not None
+
+
+    def finalize_clusters(self) -> None:
+        """ Remove clusters with only one SV per type, prepare variant list per cluster """
+
+        drop_clusters = []
+        # identify clusters to drop
+        for c_id in self.clusters:
+            svtypes = []
+            var_ids = []
+            for b_id in self.clusters[c_id]:
+                svtypes += self.bubbles[b_id]['svtype']
+                var_ids += self.bubbles[b_id]['id']
+            _, sv_counts = np.unique(svtypes, return_counts=True)
+
+            # if not remove, save var_ids
+            if sv_counts.max() == 1:
+                drop_clusters.append(c_id)
+            else:
+                # make sure we only save unique var_ids
+                # keep the order to make the output more deterministic
+                self.cluster_vars[c_id] = list(dict.fromkeys(var_ids))
+        
+        # remove cluster and related bubbles
+        for c_id in drop_clusters:
+            for b_id in self.clusters[c_id]:
+                del self.bubbles[b_id]
+            del self.clusters[c_id]
+
 
 
 def get_variant_type(variant: pysam.VariantRecord, min_sv_len: int, sv_only: bool=True) -> str:
@@ -40,27 +201,24 @@ def get_variant_type(variant: pysam.VariantRecord, min_sv_len: int, sv_only: boo
         return 'COMPLEX'
     
 
-def clean_bubble_dict(bubble_dict: dict) -> None:
-    """ Clean and annotate the bubble dict in place """
+def get_bubble_ids(variant: pysam.VariantRecord) -> list[str]:
+    """ Get list bubble ID of a variant """
 
-    drop_bubbles = []
-    for k, v in bubble_dict.items():
-        # count SVTYPE
-        sv_types, sv_counts = np.unique(v['type'], return_counts=True)
-        # remove bubble with only one SV
-        if sv_counts.max() == 1:
-            drop_bubbles.append(k)
-            continue
-        # save counts
-        bubble_dict[k]['counts'] = {t: c for t, c in zip(sv_types, sv_counts)}
+    if 'BUBBLE_ID' in variant.info:
+        bubble_ids = [variant.info['BUBBLE_ID']]
+    elif 'CONCAT' in variant.info:
+        concat_var_ids = variant.info['CONCAT'][0].split(':')
+        # concat id in format of bubble_id.type.number
+        bubble_ids = [x.rsplit('.', 2)[0] for x in concat_var_ids]
+        # remove duplicates, this happens when variants from the same bubble are concat
+        bubble_ids = list(set(bubble_ids))
+    else:
+        raise ValueError(f'Cannot find INFO/BUBBLE_ID or INFO/CONCAT in variant {variant.id}')
     
-    for k in drop_bubbles:
-        del bubble_dict[k]
+    return bubble_ids
     
-    return bubble_dict
 
-
-def get_vcf_iter(vcf: pysam.VariantFile, chr: str) -> pysam.VariantFile:
+def get_vcf_iter(vcf: truvari.VariantFile, chr: str) -> truvari.VariantFile:
     if chr is not None:
         vcf_iter = vcf.fetch(contig=chr)
     else:
@@ -69,57 +227,38 @@ def get_vcf_iter(vcf: pysam.VariantFile, chr: str) -> pysam.VariantFile:
     return vcf_iter
 
 
-def parse_vcf(vcf: pysam.VariantFile, chr: str, min_len: int) -> dict:
+def parse_vcf(vcf: truvari.VariantFile, chr: str, min_len: int) -> BubbleClusters:
     """ Read through VCF and save bubbles need to be collapsed """
 
     logger = logging.getLogger(__name__)
-    # dict to store SVs
-    # bubble_id -> {'id': [], 'type': []}
-    # TODO: this assume no inter-chr bubbles, which is safe for MC output
-    # When generalizing this in the future, need to consider process bubbles on different chr
-    bubble_dict = {}
+
+    bubble_clusters = BubbleClusters()
 
     vcf_iter = get_vcf_iter(vcf, chr)
     n_var = 0
     n_sv = 0
+
     for variant in vcf_iter:
         n_var += 1
-        # check if allele length is >= min_len
+        # find sv by allele length >= min_len
         svtype = get_variant_type(variant, min_len)
-        if svtype is None:
-            continue
-        n_sv += 1
-        
-        bubble_id = variant.info['BUBBLE_ID']
-        if bubble_id not in bubble_dict:
-            bubble_dict[bubble_id] = {'id': [], 'type': []}
-
-        # make sure id is unique
-        if variant.id in bubble_dict[bubble_id]['id']:
-            raise ValueError(f'Duplicate ID found: {variant.id}, please annotate variant with unique ID first')
-        # store SV into bubble_dict
-        bubble_dict[bubble_id]['id'].append(variant.id)
-        bubble_dict[bubble_id]['type'].append(svtype)
+        bubble_clusters.add_variant(variant, svtype)
+        if svtype is not None:
+            n_sv += 1
     
+    # update overlap for the last position
+    bubble_clusters._update_overlap()
+        
     logger.info(f'Read {n_var} variants')
     logger.info(f'Found {n_sv} SVs >= {min_len} bp')
-    # clean and annotate
-    clean_bubble_dict(bubble_dict)
-    logger.info(f'Found {len(bubble_dict)} bubbles with more than 1 SVs')
 
-    return bubble_dict
+    # find cluster and clean up
+    bubble_clusters.cluster_bubbles()
+    bubble_clusters.finalize_clusters()
 
+    logger.info(f'Found {len(bubble_clusters.clusters)} bubble clusters with more than 1 SVs per SVTYPE')
 
-def retrive_svtype(variant: pysam.VariantRecord, bubble_dict: dict) -> str:
-    """ Retrive SVTYPE from bubble dict """
-
-    bubble = bubble_dict[variant.info['BUBBLE_ID']]
-    idx = bubble['id'].index(variant.id) if variant.id in bubble['id'] else None
-
-    if idx is None:
-        return None
-
-    return bubble['type'][idx]
+    return bubble_clusters
 
 
 def annotate_sv(variant: pysam.VariantRecord, svtype: str) -> pysam.VariantRecord:
@@ -128,10 +267,10 @@ def annotate_sv(variant: pysam.VariantRecord, svtype: str) -> pysam.VariantRecor
     new_var = variant.copy()
 
     new_var.info['SVTYPE'] = svtype
-    # truvari always use INFO/SVLEN to compare size, so we set it differently
-    # this will not affect SVLEN in output VCF
+    # truvari always use INFO/SVLEN to compare size, so we set it differently:
     # INS, DEL: len(ref) - len(alt)
     # INV, COMPLEX: len(ref)
+    # this will not affect SVLEN in output VCF
     if svtype == 'COMPLEX' or svtype == 'INV':
         new_var.info['SVLEN'] = len(variant.ref)
     else:
@@ -199,6 +338,8 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
 
         drop_var = []
         # SV comparison
+        # TODO: If there are too many SVs, first filter by distance can save time
+        # e.g., var_remain_near = [var for var in var_remain if near()]
         for other_var in var_remain:
             res_match = collapse_var.match(other_var)
             if res_match.state:
@@ -236,9 +377,15 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
 def get_variant_info(variant: pysam.VariantRecord, res_match_dict: dict, info_lst: list) -> dict:
     """ Save variant info into dict """
 
+    bubble_ids = get_bubble_ids(variant)
+    if len(bubble_ids) == 1:
+        bubble_id = bubble_ids[0]
+    else:
+        bubble_id = ','.join(bubble_ids)
+
     output = {'CHROM': variant.chrom,
               'POS': variant.pos,
-              'Bubble_ID': variant.info['BUBBLE_ID'],
+              'Bubble_ID': bubble_id,
               'Variant_ID': variant.id,
             }
     output.update(res_match_dict)
@@ -255,45 +402,53 @@ def get_variant_info(variant: pysam.VariantRecord, res_match_dict: dict, info_ls
 
 
 def collapse_vcf(vcf: truvari.VariantFile, 
-                 bubble_dict: dict, 
+                 bubble_clusters: BubbleClusters, 
                  info_lst: list) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Collapse bubbles in the VCF """
     
-    working_bubbles = defaultdict(list) # bubble_id -> sv_id
-    variant_map = []
+    working_clusters = defaultdict(list) # cluster_id -> list of VariantRecord
+    collapse_map = []
     conflict_map = []
 
     for variant in vcf:
-        bubble_id = variant.info['BUBBLE_ID']
-        # bubble to skip as it does not has SV to collapse
-        if bubble_id not in bubble_dict:
+        bubble_ids = get_bubble_ids(variant)
+        cluster_id = bubble_clusters.get_bubble_cluster(bubble_ids[0])
+        # bubble without cluster means it doesn't need to be collapsed
+        if cluster_id is None:
             continue
 
-        svtype = retrive_svtype(variant, bubble_dict)
+        svtype = bubble_clusters.get_svtype(variant)
         # not a SV
         if svtype is None:
             continue
         
-        working_bubbles[bubble_id].append(annotate_sv(variant, svtype))
+        # cache annotated SVTYPE and SVLEN for comparison
+        working_clusters[cluster_id].append(annotate_sv(variant, svtype))
 
-        # collapse if all SVs in this bubble have been processed
-        n_working = len(working_bubbles[bubble_id])
-        n_total = len(bubble_dict[bubble_id]['id'])
+        # collapse if all SVs in this cluster have been processed
+        n_working = len(working_clusters[cluster_id])
+        cluster_var_ids = bubble_clusters.get_cluster_variants(cluster_id)
+        n_total = len(cluster_var_ids)
 
         if n_working == n_total:
-            bubble_map, conflict_lst = collapse_bubble(working_bubbles[bubble_id])
+            
+            cluster_map, conflict_lst = collapse_bubble(working_clusters[cluster_id])
             conflict_map += conflict_lst
-            for sv in working_bubbles[bubble_id]:
-                variant_map.append(get_variant_info(sv, bubble_map[sv.id], info_lst))
+            
+            for sv in working_clusters[cluster_id]:
+                assert sv.id in cluster_var_ids # test only: comapre working varinats and those in the cluster
+                collapse_map.append(get_variant_info(sv, cluster_map[sv.id], info_lst))
+
             # free memory
-            del working_bubbles[bubble_id]
+            del working_clusters[cluster_id]
     
-    # If everthing works well, all bubbles should be removed from working_bubble
-    assert len(working_bubbles) == 0
+    # If everthing works well, all clusters should be removed from working_clusters
+    assert len(working_clusters) == 0, \
+        f'{len(working_clusters)} clusters are not processed, e.g., {list(working_clusters.keys())[0:5]}'
 
     # convert to dataframe, remove SVs will not be merged
     df_conflict = pd.DataFrame(conflict_map)
-    df_collapse = pd.DataFrame.from_dict(variant_map)
+    df_collapse = pd.DataFrame.from_dict(collapse_map)
     sv_counts = df_collapse.value_counts('Collapse_ID')
     keep_sv = sv_counts[sv_counts > 1].index
     df_collapse = df_collapse.loc[df_collapse['Collapse_ID'].isin(keep_sv)].reset_index(drop=True)
@@ -360,7 +515,7 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam
     merge_gt = merge_has_var.astype(int)
     merge_gt[merge_missing] = -1
 
-    # check only: 
+    # test only: 
     # for one haplotype, maximum one SV
     if has_var_arr.sum(axis=0).max() > 1:
         logger = logging.getLogger(__name__)
@@ -387,7 +542,7 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord) -> pysam
     return var_collapse
 
 
-def write_outvcf(invcf: pysam.VariantFile, outvcf: pysam.VariantFile,
+def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
                  df_collapse: pd.DataFrame, chr: str, min_len: int) -> None:
     """ Convert SVs and write to output VCF """
 
@@ -469,13 +624,13 @@ def main(args: argparse.Namespace):
     logger.info(f'Read input VCF: {args.invcf}')
     invcf = truvari.VariantFile(args.invcf, 'rb', params=p)
     new_header = add_header(invcf.header)
-    bubble_dict = parse_vcf(invcf, args.chr, args.min_len)
+    bubble_clusters = parse_vcf(invcf, args.chr, args.min_len)
 
     # collapse VCF   
     invcf_iter = get_vcf_iter(invcf, args.chr)
     info_lst = [] if args.info is None else args.info.split(',')
 
-    df_collapse, df_conflict = collapse_vcf(invcf_iter, bubble_dict, info_lst)
+    df_collapse, df_conflict = collapse_vcf(invcf_iter, bubble_clusters, info_lst)
     logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
     logger.info(f'{len(df_conflict)} SV pairs are not collapsed due to haplotype conflict')
 
