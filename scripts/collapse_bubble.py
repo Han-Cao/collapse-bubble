@@ -321,7 +321,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
     """ Collapse SVs within the same cluster, return the matching results """
 
     match_map = {} # SV ID -> {Collapsed SV ID, Matching stats}
-    conflict_lst = [] # list of conflicting SVs {'Variant_ID', 'Collapse_ID'}
+    conflict_lst = [] # list of conflicting SVs {'Variant_ID', 'Conflict_ID', 'Collapse_ID'}
     collapsed_sv = defaultdict(list) # Collapsed SV ID -> list of SV records
 
     # start from the most frequent SVs
@@ -347,7 +347,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord]) -> tuple[dict, list]:
                 for check_var in collapsed_sv[collapse_var.id]:
                     if hap_conflict(check_var, other_var):
                         flag_conflict = True
-                        conflict_lst.append({'Variant1': other_var.id, 'Variant2': check_var.id, 'Collapse_ID': collapse_var.id})
+                        conflict_lst.append({'Variant_ID': other_var.id, 'Conflict_ID': check_var.id, 'Collapse_ID': collapse_var.id})
                         break
                 if flag_conflict:
                     continue

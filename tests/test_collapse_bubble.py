@@ -71,16 +71,22 @@ def vcf2np(vcf: pysam.VariantFile) -> tuple:
     return np.array(id_lst), np.array(has_var_lst), np.array(has_gt_lst)
 
 
+def is_conflict(has_var1: np.ndarray, has_var2: np.ndarray) -> bool:
+    return (has_var1 & has_var2).any()
+
+
 @pytest.mark.order(2)
 @pytest.mark.parametrize("vcf_type", TYPE)
 def test_validate_output(vcf_type: str) -> None:
     file_invcf = os.path.join(INPUT_DIR, vcf_type + '.input.vcf.gz')
     file_outvcf = os.path.join(OUTPUT_DIR, vcf_type + '.output.vcf.gz')
     file_mapping = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.collapse.txt')
+    file_conflict = os.path.join(OUTPUT_DIR, vcf_type + '.output.mapping.conflict.txt')
 
     invcf = pysam.VariantFile(file_invcf, 'rb')
     outvcf = pysam.VariantFile(file_outvcf, 'rb')
     df_map = pd.read_csv(file_mapping, sep='\t')
+    df_conflict = pd.read_csv(file_conflict, sep='\t')
 
     # generate genotype matrix
     in_idx, in_has_var, in_has_gt = vcf2np(invcf)
@@ -97,7 +103,7 @@ def test_validate_output(vcf_type: str) -> None:
     in_has_var_sum = in_has_var.sum(axis=0)
     out_has_var_sum = out_has_var.sum(axis=0)
     assert np.array_equal(in_has_var_sum, out_has_var_sum), \
-        f'Error: Number of variants ({in_has_var_sum}) in input VCF and output VCF ({out_has_var_sum}) are different'
+        f'Error: Number of variants in the input VCF ({in_has_var_sum}) and output VCF ({out_has_var_sum}) are different'
 
     # 2. check genotypes for variants without collapse
     id_no_collapse = df_idx.index[~df_idx.index.isin(df_map['Variant_ID'])]
@@ -135,6 +141,19 @@ def test_validate_output(vcf_type: str) -> None:
         assert np.array_equal(in_has_var[df_idx.loc[id_lst, 'input']].sum(axis=0),
                               out_has_var[df_idx.loc[collapse_id, 'output']]), \
             f'Error: Collapsed variants in {id_lst} have inconsistent genotypes'
+    
+    # 4. check conflicting haplotypes
+    for row in df_conflict.itertuples():
+        if row.Variant_ID in df_map['Variant_ID']:
+            target_id = df_map.loc[df_map['Variant_ID'] == row.Variant_ID, 'Collapse_ID'].values[0]
+        else:
+            target_id = row.Variant_ID
+        conflict_id = row.Collapse_ID
+        
+        target_has_var = out_has_var[df_idx.loc[target_id, 'output']]
+        conflict_has_var = out_has_var[df_idx.loc[conflict_id, 'output']]
+        assert is_conflict(target_has_var, conflict_has_var), \
+            f'Error: {target_id} and {conflict_id} are not conflicting'
         
     invcf.close()
     outvcf.close()
