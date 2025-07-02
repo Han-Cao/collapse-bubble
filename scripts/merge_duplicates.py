@@ -50,10 +50,10 @@ class DuplicatesDict:
     """ (ref, alt) -> list of variants """
 
     def __init__(self) -> None:
-        self.var_lst = []                   # no. -> pysam.VariantRecord
+        self.var_lst = []                   # list of pysam.VariantRecord
         self.n_var = 0                      # number of variants in var_lst
         self.n_merge = 0                    # number of variants merged
-        self.dup_dict = defaultdict(list)   # alleles -> list -> var idx
+        self.dup_dict = defaultdict(list)   # alleles -> [duplicated variant idx]
         self.gt_mat = np.array([])          # haplotype genotype matrix
 
 
@@ -84,7 +84,7 @@ class DuplicatesDict:
 
     def concatenate(self, hap_indexer: HapIndexer, method: str, 
                     mis_as_ref: bool, track: str, max_repeat: int) -> int:
-        """ Concatenate alleles """
+        """ Concatenate alleles, return number of new variants """
 
         gt_mat = get_gt_mat(self.var_lst)
 
@@ -95,11 +95,13 @@ class DuplicatesDict:
         new_vars = []
         if method == "position":
             # here, we pass the original gt_mat, so it is updated in-place
-            new_vars, new_vars_gt_mat, _ = concat_variants(self.var_lst, 
-                                                           gt_mat, 
-                                                           hap_indexer, 
-                                                           mis_as_ref, 
-                                                           track)
+            # for safety, we always update gt_mat
+            new_vars, new_vars_gt_mat, update_gt_mat = concat_variants(self.var_lst, 
+                                                                       gt_mat, 
+                                                                       hap_indexer, 
+                                                                       mis_as_ref, 
+                                                                       track)
+            gt_mat = update_gt_mat
         elif method == "repeat":
             motif_dict = defaultdict(list)
             new_vars_gt_lst = []
@@ -211,7 +213,7 @@ def concat_variants(var_lst: list[pysam.VariantRecord],
                     concat_id_start: int = 0) -> tuple[list[pysam.VariantRecord], np.ndarray, np.ndarray]:
     """
     Concatenate selected variants and update genotypes
-    Genotypes of input variants are updated in-place if input if a view not a copy
+    Genotypes in var_lst are updated in-place
 
     Return: 
         1. list of new variant
