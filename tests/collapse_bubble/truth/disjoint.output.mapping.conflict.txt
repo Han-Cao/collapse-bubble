@@ -1,2 +1,2 @@
-Variant_ID	Conflict_ID	Collapse_ID
-pseudo.INS.conflict	>38058649>38058909.INS.55	>38058649>38058909.INS.55
+Variant_ID	Collapse_ID
+pseudo.INS.conflict	>38058649>38058909.INS.55

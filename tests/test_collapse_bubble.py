@@ -99,6 +99,26 @@ def test_validate_output(vcf_type: str) -> None:
     df_idx = df_idx.fillna(-1)
     df_idx['output'] = df_idx['output'].astype(int)
 
+    # 0. check if mapping files meet requirements
+    uniq_collapse_id = df_map['Collapse_ID'].unique()
+    uniq_variants_id = df_map['Variant_ID'].unique()
+
+    # collapse id should not exist in variant_id column
+    assert df_map['Variant_ID'].isin(uniq_collapse_id).sum() == 0, \
+        f'Error: Collapse ID column has overlapping with Variant ID column for {vcf_type}'
+    # matching and conflict should not overlap
+    df_merge_map_conflict = pd.merge(df_map, df_conflict, how='inner', on=['Variant_ID', 'Collapse_ID'])
+    assert len(df_merge_map_conflict) == 0, \
+        f'Error: Collapse mapping file include conflicting pairs for {vcf_type}'
+    # no duplicated records in mapping files
+    assert len(df_map) == len(df_map.drop_duplicates(['Variant_ID', 'Collapse_ID'])), \
+        f'Error: Collapse mapping file has duplicated records for {vcf_type}'
+    assert len(df_conflict) == len(df_conflict.drop_duplicates(['Variant_ID', 'Collapse_ID'])), \
+        f'Error: Conflict mapping file has duplicated records for {vcf_type}'
+    # no duplicated merging in mapping files
+    assert len(uniq_variants_id) == len(df_map), \
+        f'Error: A single variant collapse to multiple variants in {vcf_type}'
+
     # 1. check number of varaints
     in_has_var_sum = in_has_var.sum(axis=0)
     out_has_var_sum = out_has_var.sum(axis=0)
@@ -106,7 +126,7 @@ def test_validate_output(vcf_type: str) -> None:
         f'Error: Number of variants in the input VCF ({in_has_var_sum}) and output VCF ({out_has_var_sum}) are different'
 
     # 2. check genotypes for variants without collapse
-    id_no_collapse = df_idx.index[~df_idx.index.isin(df_map['Variant_ID'])]
+    id_no_collapse = df_idx.index[~(df_idx.index.isin(uniq_collapse_id) | df_idx.index.isin(uniq_variants_id))]
     id_missing = id_no_collapse[df_idx.loc[id_no_collapse, 'output'] == -1].tolist()
 
     assert len(id_missing) == 0, \
@@ -122,16 +142,19 @@ def test_validate_output(vcf_type: str) -> None:
 
     # 3. check collapsed variants
 
-    collapse_lst = df_map['Collapse_ID'].unique()
     # check if variant number matched
-    assert len(in_idx) == (len(out_idx) + df_map.shape[0] - len(collapse_lst)), \
-        f'Error: Input variants no. ({len(in_idx)}) != output variants no. ({len(out_idx)}) + collapsed variants no. ({df_map.shape[0] - len(collapse_lst)})'
+    assert len(in_idx) == (len(out_idx) + df_map.shape[0]), \
+        f'Error: Input variants no. ({len(in_idx)}) != output variants no. ({len(out_idx)}) + collapsed variants no. ({df_map.shape[0]})'
 
     # check genotypes
-    for collapse_id in collapse_lst:
+    for collapse_id in uniq_collapse_id:
         df_collapse = df_map.loc[df_map['Collapse_ID'] == collapse_id]
         id_lst = df_collapse['Variant_ID'].to_list()
-        
+
+        # make sure the collapsed_id not in id_lst
+        assert collapse_id not in id_lst
+
+        id_lst += [collapse_id]
         # check consistentcy on missing genotypes
         assert np.array_equal(in_has_gt[df_idx.loc[id_lst, 'input']].all(axis=0),
                               out_has_gt[df_idx.loc[collapse_id, 'output']]), \
