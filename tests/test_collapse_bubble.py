@@ -14,7 +14,7 @@ INPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'input')
 TRUTH_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'truth')
 OUTPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'output')
 # TODO: overlap, merge_repeat, merge_position
-TYPE = ['disjoint', 'no_collapse']
+TYPE = ['disjoint', 'overlap', 'no_collapse']
 
 
 # Run command
@@ -53,7 +53,7 @@ def test_script_execution(vcf_type: str) -> None:
 
 
 # Validate output VCF
-def has_gt(x) -> bool:
+def is_none(x) -> bool:
     return x is None
 
 def has_var(x) -> bool:
@@ -68,7 +68,7 @@ def vcf2np(vcf: pysam.VariantFile) -> tuple:
     for variant in vcf.fetch():
         id_lst.append(variant.id)
         has_var_lst.append([has_var(x) for sample in variant.samples.values() for x in sample['GT']])
-        has_gt_lst.append([not has_gt(x) for sample in variant.samples.values() for x in sample['GT']])
+        has_gt_lst.append([not is_none(x) for sample in variant.samples.values() for x in sample['GT']])
     
     return np.array(id_lst), np.array(has_var_lst), np.array(has_gt_lst)
 
