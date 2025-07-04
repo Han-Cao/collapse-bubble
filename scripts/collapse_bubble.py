@@ -415,7 +415,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                 # TODO: consider add --chain like truvari?
                 if candidate_var.id in collapse_chain:
                     flag_chain_break = False
-                    chain_match_map = [] # cached match_lst for chained variants
+                    chain_match_map = {} # cached match_lst for chained variants
                     for chain_var in collapse_chain[candidate_var.id]:
                         chain_match = collapse_var.match(chain_var)
                         # collect match summary
@@ -429,7 +429,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                         continue
                     # only update match_map if this variant can be merged (i.e., no chain break)
                     else:
-                        match_map += chain_match_map
+                        match_map.update(chain_match_map)
 
                 # merge and update collapsed SV genotype
                 collapse_var = collapse_genotype([collapse_var, candidate_var], collapse_var, update_info=False)
@@ -551,6 +551,10 @@ def collapse_vcf(vcf: truvari.VariantFile,
     df_conflict = pd.DataFrame(list(conflict_map.items()), columns=['Variant_ID', 'Collapse_ID'])
     df_collapse = pd.DataFrame.from_dict(collapse_map_lst)
 
+    # no merging
+    if df_collapse.empty:
+        return df_collapse, df_conflict
+
     # check Collapse_ID no longer collapse to any other variant
     assert df_collapse['Collapse_ID'].isin(df_collapse['Variant_ID']).sum() == 0
     # remove duplicated conflict, this is due to 
@@ -651,17 +655,21 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
 
     invcf_iter = get_vcf_iter(invcf, chr)
 
-    # extract ID mapping dict from df
-    df_id_map = df_collapse[['Variant_ID', 'Collapse_ID']]
-    uniq_collapse_ids = df_id_map['Collapse_ID'].unique()
-    # include self mapping, i.e., Collapse_ID -> Collapse_ID
-    df_id_map = pd.concat([df_id_map, pd.DataFrame({'Variant_ID': uniq_collapse_ids, 
-                                                    'Collapse_ID': uniq_collapse_ids})])
-    id_map = df_id_map.set_index('Variant_ID')['Collapse_ID'].to_dict()
+    # handle with empty collapse df
+    if df_collapse.empty:
+        id_map = {}
+    else:
+        # extract ID mapping dict from df
+        df_id_map = df_collapse[['Variant_ID', 'Collapse_ID']]
+        uniq_collapse_ids = df_id_map['Collapse_ID'].unique()
+        # include self mapping, i.e., Collapse_ID -> Collapse_ID
+        df_id_map = pd.concat([df_id_map, pd.DataFrame({'Variant_ID': uniq_collapse_ids, 
+                                                        'Collapse_ID': uniq_collapse_ids})])
+        id_map = df_id_map.set_index('Variant_ID')['Collapse_ID'].to_dict()
 
-    # get summary of collapsed SV
-    df_summary = df_id_map.groupby('Collapse_ID').agg({'Variant_ID': 'count'})
-    df_summary = df_summary.rename(columns={'Variant_ID': 'count'})
+        # get summary of collapsed SV
+        df_summary = df_id_map.groupby('Collapse_ID').agg({'Variant_ID': 'count'})
+        df_summary = df_summary.rename(columns={'Variant_ID': 'count'})
 
     # cache variants
     working_collapse = defaultdict(list) # collapse SV ID -> list of SVs to be merged
@@ -740,7 +748,10 @@ def main(args: argparse.Namespace):
     info_lst = [] if args.info is None else args.info.split(',')
 
     df_collapse, df_conflict = collapse_vcf(invcf_iter, bubble_clusters, info_lst)
-    logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
+    if df_collapse.empty:
+        logger.warning('No SVs are collapsed, please check input VCF')
+    else:
+        logger.info(f'Collapse {len(df_collapse)} SVs into {df_collapse["Collapse_ID"].unique().shape[0]} SVs')
     logger.info(f'{len(df_conflict)} SV pairs are not collapsed due to haplotype conflict')
     # write output VCF
     outvcf = truvari.VariantFile(args.outvcf, 'w', header=new_header)
@@ -753,7 +764,7 @@ def main(args: argparse.Namespace):
     collapse_cols += [f'INFO_{x}' for x in info_lst]
     collapse_cols += ['PctSeqSimilarity', 'PctSizeSimilarity', 'PctRecOverlap', 
                       'SizeDiff', 'StartDistance', 'EndDistance', 'TruScore']
-    df_collapse = df_collapse[collapse_cols]
+    df_collapse = df_collapse[collapse_cols] if not df_collapse.empty else pd.DataFrame(columns=collapse_cols)
     file_out_collapse = f'{args.map}.collapse.txt'
     file_out_conflict = f'{args.map}.conflict.txt'
 
