@@ -14,7 +14,7 @@ INPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'input')
 TRUTH_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'truth')
 OUTPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'output')
 # TODO: overlap, merge_repeat, merge_position
-TYPE = ['disjoint', 'overlap', 'no_collapse']
+TYPE = ['disjoint', 'overlap', 'merge_repeat', 'no_collapse']
 
 
 # Run command
@@ -206,6 +206,9 @@ def test_output(vcf_type: str) -> None:
     df_confilict_output = pd.read_csv(file_output_confilict, sep='\t')
 
     # compare mapping files
+    # for multie bubble variant, we need to first sort Bubble_ID to ensure identical output
+    df_collapse_truth['Bubble_ID'] = df_collapse_truth['Bubble_ID'].str.split(',').apply(sorted).str.join(',')
+    df_collapse_output['Bubble_ID'] = df_collapse_output['Bubble_ID'].str.split(',').apply(sorted).str.join(',')
     assert df_collapse_truth.equals(df_collapse_output), f"Collapse mapping mismatch for VCF: {vcf_type}"
     assert df_confilict_truth.equals(df_confilict_output), f"Conflict mapping mismatch for VCF: {vcf_type}"
 
