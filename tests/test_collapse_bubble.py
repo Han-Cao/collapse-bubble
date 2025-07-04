@@ -13,7 +13,8 @@ SCRIPT = os.path.join(TEST_DIR, '..', 'scripts', SCRIPT_NAME)
 INPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'input')
 TRUTH_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'truth')
 OUTPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'output')
-TYPE = ['disjoint']
+# TODO: overlap, merge_repeat, merge_position
+TYPE = ['disjoint', 'no_collapse']
 
 
 # Run command
@@ -34,6 +35,7 @@ def run_script(vcf_type: str) -> None:
                '-i', invcf, 
                '-o', outvcf,
                '-m', outmap,
+               '-r', '100', '-p', '0.9', '-P', '0.9', '-O', '0.9',
                '--info', 'SVTYPE,SVLEN']
     
     subprocess.run(command, check=True)
