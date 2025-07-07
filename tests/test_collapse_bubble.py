@@ -14,7 +14,7 @@ INPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'input')
 TRUTH_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'truth')
 OUTPUT_DIR = os.path.join(TEST_DIR, 'collapse_bubble', 'output')
 # TODO: overlap, merge_repeat, merge_position
-TYPE = ['disjoint', 'overlap', 'merge_repeat', 'no_collapse']
+TYPE = ['disjoint', 'overlap', 'chain', 'merge_repeat', 'no_collapse']
 
 
 # Run command
