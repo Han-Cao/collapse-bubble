@@ -33,6 +33,7 @@ Here, we get a non-overlapping, deduplicated VCF.
 - [How it works](#how-it-works)
     - [Proof](#proof)
     - [Demonstration](#demonstration)
+- [Notes](#notes)
 - [Limitations](#limitations)
 
 ## Input requirements
@@ -48,7 +49,7 @@ These ensure when 2 alleles are found at the same position, all variants except 
 Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
 
 ```
-(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1 -k2,2n) | bgzip > output.vcf.gz
+(bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1d -k2,2n) | bgzip > output.vcf.gz
 ```
 
 ## How it works
@@ -242,10 +243,24 @@ alt = AAAA
 
 Q.E.D
 
+## Notes
+
+After allele concatenation, the output VCF it possible to be further normalized by `bcftools norm`. For example:
+
+```
+Input
+chr20   195745  >40785190>40785193      C       T
+chr20   195745  >40785193>40785203_4    CGTGT   C
+
+Output
+chr20   195745  chr20:195745_0          CGTGT   T
+```
+
+In the new variant, both `REF` and `ALT` end with `T`, so it can be further left align to `chr20 195744 TCGTG   T`. This convert the original SNP + repeat deletion at chr20:195745 to a single deletion at chr20:195744, which could be misleading for downstream analysis. Therefore, it is not recommended to use `bcftools norm` after `merge_duplicates.py`.
 
 ## Limitations:
 
-To concatenate alleles, the script will find all alt alleles and concat them together. This is fast as we only need to care about the sum of existing alt alleles. However, it could be time-consuming if we need to perfectly determine whether other haplotypes have reference allele or missing genotype:
+To concatenate alleles, the script only consider the combination of alternative alleles seen on existing haplotypes. This can correctly identify alternative alleles but may not be perfect to distinguish between the reference allele and missing genotypes. To perfectly determine whether one haplotypes has reference allele or missing genotype, we need a greedy search for all possible combinations:
 
 ```
               sample1   sample2
@@ -257,10 +272,10 @@ To concatenate alleles, the script will find all alt alleles and concat them tog
 -> C AAAAAAA  1|0       ?|0
 ```
 
-- For sample1, we concat 1,4 to get the final 6A insertion. 
+- For sample1, we concat 1,4 and get the final 6A insertion. 
 - For sample2, if also consider 1,4, its genotype is `0|0`, but if we consider 2,3, it should be `.|0`.
  
-This means we need to find all possible combinations that can generate the same allele to determine whether the genotypes for non-alt haplotypes are ref or missing. This requires a lot of time when there are many variants to be considered, and most combinations should not affect the final result. Therefore, we currently only check the conbinations that are seen (i.e., 1,4 not 3,4) in existing haplotypes. 
+However, a greedy search is too expensive when there are many variants to be considered. Since most combinations should not affect the final result, we currently only check the conbinations that are seen (i.e., 1,4 not 3,4) in existing haplotypes. 
 
 If you already specify `--merge-mis-as-ref`, this would not be a problem. Because the genotypes of concatenated alleles are missing if and only if all existing genotypes are missing:
 
