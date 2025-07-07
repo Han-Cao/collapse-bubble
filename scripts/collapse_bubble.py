@@ -13,6 +13,7 @@ import truvari
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
 class BubbleClusters:
     """ Clusters of bubbles overlapping with the same tandem repeat """
@@ -37,12 +38,6 @@ class BubbleClusters:
             return self.bubbles[bubble_id]['cluster']
         else:
             return None
-    
-
-    def get_cluster_variants(self, cluster_id: int) -> list:
-        """ Get dict of variants in a cluster """
-
-        return self.cluster_vars[cluster_id]
     
 
     def validate_cluster_variants(self, cluster_id: int, bubble_id: str, var_lst: list[pysam.VariantRecord]) -> None:
@@ -263,8 +258,6 @@ def get_vcf_iter(vcf: truvari.VariantFile, chr: str) -> truvari.VariantFile:
 def parse_vcf(vcf: truvari.VariantFile, chr: str, min_len: int) -> BubbleClusters:
     """ Read through VCF and save bubbles need to be collapsed """
 
-    logger = logging.getLogger(__name__)
-
     bubble_clusters = BubbleClusters()
 
     vcf_iter = get_vcf_iter(vcf, chr)
@@ -403,6 +396,8 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
         # SV comparison
         for candidate_var in var_remain:
             res_match = collapse_var.match(candidate_var)
+            logger.debug(f'Direct compare {candidate_var.id} with {collapse_var.id}: {res_match.state}. ' + 
+                         f'(seqsim:{res_match.seqsim}, sizesim:{res_match.sizesim}, ovlpct:{res_match.ovlpct})')
             if res_match.state:
                 # check haplotype consistency against collapsed SV
                 if hap_conflict(candidate_var, collapse_var):
@@ -418,6 +413,8 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                     chain_match_map = {} # cached match_lst for chained variants
                     for chain_var in collapse_chain[candidate_var.id]:
                         chain_match = collapse_var.match(chain_var)
+                        logger.debug(f'Chained compare {chain_var.id} with {collapse_var.id}: {chain_match.state}. ' + 
+                                     f'(seqsim:{chain_match.seqsim}, sizesim:{chain_match.sizesim}, ovlpct:{chain_match.ovlpct})')
                         # collect match summary
                         if chain_match.state:
                             chain_match_map[chain_var.id] = match_summary(collapse_var.id, chain_match)
@@ -624,13 +621,11 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord, update_i
     # test only: 
     # for one haplotype, maximum one SV
     if has_var_arr.sum(axis=0).max() > 1:
-        logger = logging.getLogger(__name__)
         logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
         raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
     # TODO: when extending to overlapping bubbles, this may not true, need testing
     if (merge_has_var & merge_missing).any():
-        logger = logging.getLogger(__name__)
         logger.warning(f'{var_collapse.id} has inconsistent genotypes (. vs 1) on the same haplotype after collapsing')
     
     # update genotypes
@@ -720,11 +715,13 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
 def main(args: argparse.Namespace):
 
     # setup logger
-    logging.basicConfig(level=logging.INFO,
+    if args.debug:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    logging.basicConfig(level=log_level,
                         format='[%(asctime)s] - [%(levelname)s]: %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
-
-    logger = logging.getLogger(__name__)
 
     # set up matcher
     p = truvari.VariantParams(refdist=args.refdist,
@@ -804,6 +801,10 @@ if __name__ == '__main__':
                              help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: 0.9')
     collapse_arg.add_argument('-O', '--pctovl', metavar='0.9', type=float, default=0.9,
                              help='Min pct reciprocal overlap. Default: 0.9')
+    
+    other_arg = parser.add_argument_group('Other arguments')
+    other_arg.add_argument('--debug', action='store_true', 
+                          help='Debug mode')
     
     args = parser.parse_args()
     main(args)
