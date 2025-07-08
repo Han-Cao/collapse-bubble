@@ -1,6 +1,6 @@
 # Merge duplicates
 
-This script `merge_duplicates.py` will perform a two-step process to merge duplicated VCF records and overlapping alleles at the same position:
+`merge_duplicates.py` performs a two-step process to merge duplicated VCF records and overlapping alleles at the same position:
 
 **Step 1**: Concatenate the alleles at the same position if they are on the same haplotype. This step is similar as the haplotype reconstruction that has been disccused in [vt](https://github.com/atks/vt/issues/16).
 
