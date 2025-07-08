@@ -181,7 +181,7 @@ chr1   100   var1   C   G     1|1
 chr1   100   chr1:100_0   C   CAAAA 1|0
 ```
 
-**Note**: When using `merge_duplicates.py -c position`, it concatenates any overlapping variants at the same position. This method reconstructs the local haplotypes and significantly increasing polymorphism, which may not be suitable for merging tandem repeats. Additionally, it requires the input VCF sorted by `CHROM` and `POS` only (not guaranteed by recent `bcftools`). Please read the [documentation](docs/merge_duplicates.md) before using it.
+**Note**: When using `merge_duplicates.py -c position`, it concatenates any overlapping variants at the same position. This method reconstructs the local haplotypes and significantly increasing polymorphism, which may not be suitable for merging tandem repeats. Additionally, it requires the input VCF sorted by `CHROM` and `POS` only (not guaranteed by recent `bcftools`). Please see [documentation](docs/merge_duplicates.md) for more details.
 
 
 **Arguments**:
@@ -251,7 +251,7 @@ In this table, the first row indicates the SV `>38058649>38058909.DEL.33` at `ch
 
 Additionally, VCF INFO fields can be included as separate columns by specifying `--info`. If `--info SVLEN` is used, the output SVLEN in the tsv file will be REFLEN for COMPLEX and INV to indicate the value used for comparison. While in the output VCF, INFO/SVLEN is always calculated by `len(alt) - len(ref)`.
 
-** 3. Similar SV pairs with conflicting genotypes **
+**3. Similar SV pairs with conflicting genotypes**
 
 A TSV file listing SVs (`Variant_ID`) that are similar to another SV (`Collapse_ID`) but have conflicting genotypes.
 
