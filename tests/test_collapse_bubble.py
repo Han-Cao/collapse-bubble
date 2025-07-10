@@ -169,16 +169,19 @@ def test_validate_output(vcf_type: str) -> None:
     
     # 4. check conflicting haplotypes
     for row in df_conflict.itertuples():
-        if row.Variant_ID in df_map['Variant_ID']:
+        if row.Variant_ID in df_map['Variant_ID'].values:
             target_id = df_map.loc[df_map['Variant_ID'] == row.Variant_ID, 'Collapse_ID'].values[0]
         else:
             target_id = row.Variant_ID
-        conflict_id = row.Collapse_ID
+        if row.Collapse_ID in df_map['Variant_ID'].values:
+            conflict_id = df_map.loc[df_map['Variant_ID'] == row.Collapse_ID, 'Collapse_ID'].values[0]
+        else:
+            conflict_id = row.Collapse_ID
         
         target_has_var = out_has_var[df_idx.loc[target_id, 'output']]
         conflict_has_var = out_has_var[df_idx.loc[conflict_id, 'output']]
         assert is_conflict(target_has_var, conflict_has_var), \
-            f'Error: {target_id} and {conflict_id} are not conflicting'
+            f'Error: {row.Variant_ID} and {row.Collapse_ID} are not conflicting'
         
     invcf.close()
     outvcf.close()
