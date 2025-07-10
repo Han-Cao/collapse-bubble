@@ -786,21 +786,21 @@ if __name__ == '__main__':
     io_arg.add_argument('-m', '--map', metavar='PREFIX', type=str, required=True,
                        help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
     io_arg.add_argument('--chr', metavar='CHR', type=str, default=None,
-                       help='chromosome to work on. Default: all')
+                       help='chromosome to work on, all if not specified. Default: %(default)s')
     io_arg.add_argument('--info', metavar='TAG', type=str, default=None,
-                       help='Comma-separated INFO/TAG list to include in the output map. Default: None')
+                       help='Comma-separated INFO/TAG list to include in the output map. Default: %(default)s')
 
     collapse_arg = parser.add_argument_group('Collapse arguments')
     collapse_arg.add_argument('-l', '--min-len', metavar='50', type=int, default=50,
-                             help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: 50')
-    collapse_arg.add_argument('-r', '--refdist', metavar='100', type=int, default=100,
-                             help='Max reference location distance. Default: 100')
+                             help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: %(default)s')
+    collapse_arg.add_argument('-r', '--refdist', metavar='500', type=int, default=500,
+                             help='Max reference location distance. Default: %(default)s')
     collapse_arg.add_argument('-p', '--pctseq', metavar='0.9', type=float, default=0.9,
-                             help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: 0.9')
+                             help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: %(default)s')
     collapse_arg.add_argument('-P', '--pctsize', metavar='0.9', type=float, default=0.9,
-                             help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: 0.9')
-    collapse_arg.add_argument('-O', '--pctovl', metavar='0.9', type=float, default=0.9,
-                             help='Min pct reciprocal overlap. Default: 0.9')
+                             help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: %(default)s')
+    collapse_arg.add_argument('-O', '--pctovl', metavar='0', type=float, default=0,
+                             help='Min pct reciprocal overlap. Default: %(default)s')
     
     other_arg = parser.add_argument_group('Other arguments')
     other_arg.add_argument('--debug', action='store_true', 
