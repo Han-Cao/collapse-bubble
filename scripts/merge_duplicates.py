@@ -331,7 +331,7 @@ def create_concat_var(var_lst: list[pysam.VariantRecord], gt_lst: list[int],
         return None
     
     new_var = var_lst[-1].copy()
-    new_var.id = f'{new_var.chrom}:{new_var.pos}_{var_id_no}'
+    new_var.id = f'{new_var.chrom}_{new_var.pos}_{var_id_no}'
     new_var.alleles = (concat_ref, concat_alt)
 
     new_var.info.clear()
@@ -551,6 +551,9 @@ def merge_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool) -> np.ndarray:
 
 
 # O(n) algorithm from https://stackoverflow.com/questions/6021274
+# TODO: should we use pytrf to allow repeat motif with mismatch?
+# Since overlapping TRs must by exact matches, this only affect whether merge the first TR or not
+# if really want to merge the first one, maybe -c position is the case?
 def find_rep_motif(allele: str) -> str:
     
     # is_indel ensures there must be a str to check, we don't need to check again
