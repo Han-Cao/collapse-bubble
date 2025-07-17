@@ -1,7 +1,7 @@
 # collapse-bubble
 
 [![pytest](https://github.com/Han-Cao/collapse-bubble/actions/workflows/pytest.yml/badge.svg)](https://github.com/Han-Cao/collapse-bubble/actions)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/han-cao/5f34407433757530f581fae3fe86d283/raw/collapse-bubble-cobertura-coverage.json)](https://github.com/Han-Cao/collapse-bubble)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/han-cao/5baaf521e0e161712d3493546f6a8876/raw/collapse-bubble-cobertura-coverage.json)](https://github.com/Han-Cao/collapse-bubble)
 
 Variant merging for VCF deconstructed from a pangenome graph, including vertical merging for overlapping/duplicated variants and horizontal merging for similar structural variantions (SVs).
 

@@ -51,5 +51,5 @@ jobs:
       - name: Upload coverage
         uses: gaelgirodon/ci-badges-action@v1
         with:
-            gist-id: 5f34407433757530f581fae3fe86d283
+            gist-id: 5baaf521e0e161712d3493546f6a8876
             token: ${{ secrets.GIST_TOKEN }}
