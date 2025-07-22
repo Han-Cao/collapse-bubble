@@ -372,7 +372,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
     
     Return:
     keep_vars: list of non-redundant SVs after collapse
-    collapse_dict: dict of collpase id -> [collapsed VariantRecord]
+    collapse_dict: dict of collapase id -> [collapsed VariantRecord]
     match_map: dict of SV matching results
     conflict_map: dict of conflicting SVs {'Variant_ID': 'Collapse_ID'}
 
@@ -390,11 +390,12 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
     # start from the most frequent SVs
     var_remain = sorted(var_lst, key=mac, reverse=True)
     while len(var_remain) > 0:
-        collapse_var = var_remain.pop(0)
-        drop_var = []
+        collapse_var = var_remain[0]
+        drop_idx = [0]
 
         # SV comparison
-        for candidate_var in var_remain:
+        for i in range(1, len(var_remain)):
+            candidate_var = var_remain[i]
             res_match = collapse_var.match(candidate_var)
             logger.debug(f'Direct compare {candidate_var.id} with {collapse_var.id}: {res_match.state}. ' + 
                          f'(seqsim:{res_match.seqsim}, sizesim:{res_match.sizesim}, ovlpct:{res_match.ovlpct})')
@@ -434,11 +435,13 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                 # update SV merging results
                 match_map[candidate_var.id] = match_summary(collapse_var.id, res_match)
                 collapse_dict[collapse_var.id].append(candidate_var)
-                drop_var.append(candidate_var)
+
+                drop_idx.append(i)
         
         # all variants have been compared, update variant list
         keep_vars.append(collapse_var)
-        var_remain = [x for x in var_remain if x not in drop_var]
+        drop_set = set(drop_idx)
+        var_remain = [x for i, x in enumerate(var_remain) if i not in drop_set]
            
     return keep_vars, collapse_dict, match_map, conflict_map
 
