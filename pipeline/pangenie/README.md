@@ -4,12 +4,14 @@ This pipeline integrate `collapse-bubble` into the `PanGenie` genotyping pipelin
 
 **Important**: This pipeline is under development and may change in the future. Use at your own risk.
 
+## Prepare PanGenie reference
+
 Input
 - `Minigraph-Cactus` raw VCF: `mc.raw.vcf.gz`
 - `Minigraph-Cactus` GFA: `mc.gfa`
 
 Output
-- Collapsed biallelic VCF: `mc.pangenie.biallelic.uniqid.vcfwave.merge.vcf.gz `
+- Collapsed biallelic VCF: `mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`
 - Graph VCF with collapsed ID annotation: `mc.pangenie.collapse_id.vcf.gz`
 
 ```bash
@@ -42,19 +44,41 @@ vcfwave -I 1000 | bgzip -c > mc.pangenie.biallelic.uniqid.vcfwave.vcf.gz
 bcftools norm -f ref.fa mc.pangenie.biallelic.uniqid.vcfwave.vcf.gz | \
 bcftools sort --write-index -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz
 
-# SV merging
-# this can be used as the biallelic VCF required by PanGenie sciprt `convert-to-biallelic.py`
-python /path/to/collapse-bubble/scripts/collapse_bubble.py \
+# merge duplicates and overlap
+python /path/to/collapse-bubble/scripts/merge_duplicates.py \
 -i mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
--o mc.pangenie.biallelic.uniqid.vcfwave.merge.vcf.gz \
---map mc.pangenie.biallelic.uniqid.vcfwave.merge.mapping.txt
+-o mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+-c repeat \
+--track ID \
+tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz
+
+# SV merging
+python /path/to/collapse-bubble/scripts/collapse_bubble.py \
+-i mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz \
+-o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz \
+--map mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping
+
+bcftools sort \
+-m 4G -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz \
+mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
+tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 
 # annotate graph VCF with collapsed ID
 # this can be used as PanGenie reference Graph VCF
 python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
 --graph-vcf mc.pangenie.sort.vcf.gz \
 --wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
---mapping mc.pangenie.biallelic.uniqid.vcfwave.merge.mapping.txt \
+--mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+--mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
 -o mc.pangenie.collapse_id.vcf.gz
 tabix mc.pangenie.collapse_id.vcf.gz
+```
+
+## Merge duplicates in biallelic PanGenie output
+
+```
+python /path/to/collapse-bubble/pipeline/pangenie/merge_duplicates_pangenie.py \
+-i pangenie.biallelic.vcf.gz \
+-o pangenie.biallelic.merge_dup.vcf.gz \
+-r mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 ```
