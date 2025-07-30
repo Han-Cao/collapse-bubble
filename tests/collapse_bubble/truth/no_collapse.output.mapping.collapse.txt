@@ -1,0 +1,1 @@
+Chrom	Position	Bubble_ID	Variant_ID	Collapse_ID	INFO_SVTYPE	INFO_SVLEN	PctSeqSimilarity	PctSizeSimilarity	PctRecOverlap	SizeDiff	StartDistance	EndDistance	TruScore
