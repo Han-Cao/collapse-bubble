@@ -660,7 +660,9 @@ def check_vcf(vcf: pysam.VariantFile, n: int) -> None:
                 raise ValueError('Unphased sample is not supported')
 
 
-def main(args: argparse.Namespace):
+def main() -> None:
+
+    args = parse_args()
 
     # setup logger
     if args.debug:
@@ -741,7 +743,7 @@ def main(args: argparse.Namespace):
     outvcf.close()
 
 
-if __name__ == '__main__':
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog='merge_duplicates.py', description='Merge duplicated variants in phased VCF')
     parser.add_argument('-i', '--invcf', metavar='VCF', help='Input VCF, sorted and phased', required=True)
     parser.add_argument('-o', '--outvcf', metavar='VCF', help='Output VCF', required=True)
@@ -760,4 +762,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    main(args)
+    return args
+
+
+if __name__ == '__main__':
+    main()

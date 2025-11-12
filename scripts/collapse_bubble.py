@@ -715,7 +715,9 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
     assert len(working_collapse) == 0
 
 
-def main(args: argparse.Namespace):
+def main() -> None:
+
+    args = parse_args()
 
     # setup logger
     if args.debug:
@@ -777,9 +779,9 @@ def main(args: argparse.Namespace):
     outvcf.close()
 
 
-if __name__ == '__main__':
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog='collapse_bubble.py', 
-                                   description='Collapse biallelic SVs within the same bubble in VCF')
+                                     description='Collapse biallelic SVs within the same bubble in VCF')
 
     io_arg = parser.add_argument_group('Input / Output arguments')
     io_arg.add_argument('-i', '--invcf', metavar='VCF', required=True, 
@@ -810,4 +812,9 @@ if __name__ == '__main__':
                           help='Debug mode')
     
     args = parser.parse_args()
-    main(args)
+
+    return args
+
+
+if __name__ == '__main__':
+    main()
