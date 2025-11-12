@@ -31,10 +31,16 @@ For more information on how it works, please refer to the [documentation](docs/)
 
 ## Dependency
 
-All scripts have been tested with Python 3.10. Please run the following command to install the required modules:
+All [scripts](scripts/) have been tested with Python 3.10. To install dependencies, run:
 
 ```
 pip install -r requirements.txt
+```
+
+or 
+
+```
+pip install .
 ```
 
 The following tools are not used by `collapse-bubble` scripts but are required to prepare the input VCF:
