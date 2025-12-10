@@ -2,7 +2,7 @@
 
 This pipeline integrate `collapse-bubble` into the `PanGenie` genotyping pipeline. Please make sure you have read the [Pangenie pipeline](https://github.com/eblerjana/genotyping-pipelines/tree/main/prepare-vcf-MC) and installed required `PanGenie` scripts.
 
-**Important**: This pipeline is under development and may change in the future. Use at your own risk.
+**Important**: This pipeline is under development and may change in the future. Some of the scripts reply on estimated Hardy-Weinberg Equilibrium (HWE) and allele frequencies (AF). It may not work well for small datasets. Please use this pipeline with caution.
 
 ## Prepare PanGenie reference
 
@@ -66,14 +66,64 @@ mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 
 # annotate graph VCF with collapsed ID
-# PanGenie graph VCF: mc.pangenie.collapse_id.vcf.gz
+# PanGenie graph VCF: mc.pangenie.collapse_id.vcf
 python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
 --graph-vcf mc.pangenie.sort.vcf.gz \
 --wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
 --mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
 --mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
--o mc.pangenie.collapse_id.vcf.gz
-tabix mc.pangenie.collapse_id.vcf.gz
+-o mc.pangenie.collapse_id.vcf
+
+# prepare PanGenie index 
+PanGenie-index \
+-v mc.pangenie.collapse_id.vcf \
+-r ref.fa \
+-o mc.pangenie.collapse_id.index
+```
+
+## Run PanGenie
+
+Run PanGenie from the annotated graph VCF
+```bash
+# Genotyping
+PanGenie \
+-i <(zcat fastq.gz) \
+-f mc.pangenie.collapse_id.index \
+-o sample.pangenie.vcf \
+-s sample
+
+# convert to biallelic VCF
+cat sample.pangenie.vcf | \
+python3 convert-to-biallelic.py \
+mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
+bgzip > sample.pangenie.biallelic.vcf.gz
+
+# merge across samples
+# this is necessary for merge_duplicates_pangenie.py
+bcftools merge *vcf.gz -Oz -o population.pangenie.biallelic.vcf.gz
+```
+
+If you have already run the original PanGenie pipeline, you don't need to re-run it with the annotated graph VCF (`mc.pangenie.collapse_id.vcf`). Instead, you can annotate the output VCF with collapsed ID and then convert it to biallelic:
+
+```bash
+# Prepare ID annotation
+bcftools query -f '%CHROM\t%POS\t%INFO/ID\n' mc.pangenie.collapse_id.vcf | \
+bgzip > mc.pangenie.collapse_id.txt.gz
+tabix -s1 -b2 -e2 mc.pangenie.collapse_id.txt.gz
+
+# Annotate VCF and convert to biallelic
+bcftools annotate \
+-a mc.pangenie.collapse_id.txt.gz \
+-c CHROM,POS,INFO/ID \
+--pair-logic "all" \
+sample.pangenie.vcf | \
+python3 convert-to-biallelic.py \
+mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
+bgzip > sample.pangenie.biallelic.vcf.gz
+
+# merge across samples
+# this is necessary for merge_duplicates_pangenie.py
+bcftools merge *vcf.gz -Oz -o population.pangenie.biallelic.vcf.gz
 ```
 
 ## Merge duplicates in biallelic PanGenie output
@@ -139,3 +189,5 @@ Conflict: No   No   Yes
 2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is generally not required based on our test.
 
 3. **Frequency check**: After merging, we compare the resulting AF against the reference panel frequencies (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). If merging heterozygous genotypes increases the AF discrepancy from the reference panel, the merge is rejected. This ensures merging is performed only when it genuinely improves genotype accuracy.
+
+Since this step require estmating AF and HWE, please only run it on population VCFs.
