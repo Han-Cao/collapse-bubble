@@ -11,8 +11,10 @@ Input
 - `Minigraph-Cactus` GFA: `mc.gfa`
 
 Output
-- Collapsed biallelic VCF: `mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`
 - Graph VCF with collapsed ID annotation: `mc.pangenie.collapse_id.vcf.gz`
+- Collapsed biallelic VCF: `mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`
+- ID annotation file: `mc.pangenie.collapse_id.txt.gz`
+- PanGenie index: `mc.pangenie.index`
 
 ```bash
 # vcfbub
@@ -25,7 +27,8 @@ python3 /path/to/pangenie/scripts/annotate_vcf.py \
 -o mc.pangenie
 
 # sort graph VCF
-bcftools sort --write-index -Oz -o mc.pangenie.sort.vcf.gz mc.pangenie.vcf
+bcftools sort -o mc.pangenie.sort.vcf mc.pangenie.vcf
+bcftools sort --write-index -Oz -o mc.pangenie.sort.vcf.gz mc.pangenie.sort.vcf
 # sort and normalize biallelic VCF
 bcftools norm -f ref.fa -Ou mc.pangenie.biallelic.vcf | bcftools sort --write-index -Oz -o mc.pangenie.biallelic.sort.vcf.gz
 
@@ -74,7 +77,17 @@ python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
 --mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
 -o mc.pangenie.collapse_id.vcf
 
-# prepare PanGenie index 
+# Prepare ID annotation
+bcftools query -f '%CHROM\t%POS\t%INFO/ID\n' mc.pangenie.collapse_id.vcf | \
+bgzip > mc.pangenie.collapse_id.txt.gz
+tabix -s1 -b2 -e2 mc.pangenie.collapse_id.txt.gz
+
+# prepare PanGenie index
+PanGenie-index \
+-v mc.pangenie.sort.vcf \
+-r ref.fa \
+-o mc.pangenie.index
+
 PanGenie-index \
 -v mc.pangenie.collapse_id.vcf \
 -r ref.fa \
@@ -83,7 +96,39 @@ PanGenie-index \
 
 ## Run PanGenie
 
-Run PanGenie from the annotated graph VCF
+Run PanGenie, and convert to biallelic VCF with or without SV merging:
+```bash
+# Genotyping
+PanGenie \
+-i <(zcat fastq.gz) \
+-f mc.pangenie.index \
+-o sample.pangenie.vcf \
+-s sample
+
+# convert to biallelic VCF without SV merging
+cat sample.pangenie.vcf | \
+python3 convert-to-biallelic.py mc.pangenie.biallelic.sort.vcf.gz | \
+bgzip > sample.pangenie.biallelic.raw.vcf.gz
+
+# convert to biallelic VCF with SV merging
+# this need to annotate pangenie output with collapsed ID
+bcftools annotate \
+-a mc.pangenie.collapse_id.txt.gz \
+-c CHROM,POS,INFO/ID \
+--pair-logic "all" \
+sample.pangenie.vcf | \
+python3 convert-to-biallelic.py \
+mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
+bgzip > sample.pangenie.biallelic.collapse.vcf.gz
+
+# merge across samples
+# this is necessary for merge_duplicates_pangenie.py
+bcftools merge *raw.vcf.gz -Oz -o population.pangenie.biallelic.raw.vcf.gz
+bcftools merge *collapse.vcf.gz -Oz -o population.pangenie.biallelic.collapse.vcf.gz
+```
+
+If you don't want the raw VCF without SV merging, you can directly run from the annotated graph VCF:
+
 ```bash
 # Genotyping
 PanGenie \
@@ -92,38 +137,16 @@ PanGenie \
 -o sample.pangenie.vcf \
 -s sample
 
-# convert to biallelic VCF
+# convert to biallelic VCF with SV merging
 cat sample.pangenie.vcf | \
 python3 convert-to-biallelic.py \
 mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
-bgzip > sample.pangenie.biallelic.vcf.gz
+bgzip > sample.pangenie.biallelic.collapse.vcf.gz
 
 # merge across samples
 # this is necessary for merge_duplicates_pangenie.py
-bcftools merge *vcf.gz -Oz -o population.pangenie.biallelic.vcf.gz
-```
-
-If you have already run the original PanGenie pipeline, you don't need to re-run it with the annotated graph VCF (`mc.pangenie.collapse_id.vcf`). Instead, you can annotate the output VCF with collapsed ID and then convert it to biallelic:
-
-```bash
-# Prepare ID annotation
-bcftools query -f '%CHROM\t%POS\t%INFO/ID\n' mc.pangenie.collapse_id.vcf | \
-bgzip > mc.pangenie.collapse_id.txt.gz
-tabix -s1 -b2 -e2 mc.pangenie.collapse_id.txt.gz
-
-# Annotate VCF and convert to biallelic
-bcftools annotate \
--a mc.pangenie.collapse_id.txt.gz \
--c CHROM,POS,INFO/ID \
---pair-logic "all" \
-sample.pangenie.vcf | \
-python3 convert-to-biallelic.py \
-mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
-bgzip > sample.pangenie.biallelic.vcf.gz
-
-# merge across samples
-# this is necessary for merge_duplicates_pangenie.py
-bcftools merge *vcf.gz -Oz -o population.pangenie.biallelic.vcf.gz
+bcftools merge *raw.vcf.gz -Oz -o population.pangenie.biallelic.raw.vcf.gz
+bcftools merge *collapse.vcf.gz -Oz -o population.pangenie.biallelic.collapse.vcf.gz
 ```
 
 ## Merge duplicates in biallelic PanGenie output
