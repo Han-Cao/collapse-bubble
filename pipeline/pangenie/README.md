@@ -2,7 +2,7 @@
 
 This pipeline integrate `collapse-bubble` into the `PanGenie` genotyping pipeline. Please make sure you have read the [Pangenie pipeline](https://github.com/eblerjana/genotyping-pipelines/tree/main/prepare-vcf-MC) and installed required `PanGenie` scripts.
 
-**Important**: This pipeline is under development and may change in the future. Some of the scripts reply on estimated Hardy-Weinberg Equilibrium (HWE) and allele frequencies (AF). It may not work well for small datasets. Please use this pipeline with caution.
+**Important**: This pipeline is under development and may change in the future. Some of the scripts reply on estimated Hardy-Weinberg Equilibrium (HWE) and allele frequencies (AF) in the population. It may not work well for small datasets. Please use this pipeline with caution.
 
 ## Prepare PanGenie reference
 
@@ -183,9 +183,11 @@ T TAAA         0/0  0/1  0/0
 The duplicated records can be merged by `merge_duplicates_pangenie.py`:
 
 ```
+# IMPORTANT:
+# this step relies on estimated AF and HWE, please only run it on population VCFs.
 python /path/to/collapse-bubble/pipeline/pangenie/merge_duplicates_pangenie.py \
--i pangenie.biallelic.vcf.gz \
--o pangenie.biallelic.merge_dup.vcf.gz \
+-i population.pangenie.biallelic.collapse.vcf.gz \
+-o population.pangenie.biallelic.collapse.merge_dup.vcf.gz \
 -r mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 ```
 
@@ -212,5 +214,3 @@ Conflict: No   No   Yes
 2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is generally not required based on our test.
 
 3. **Frequency check**: After merging, we compare the resulting AF against the reference panel frequencies (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). If merging heterozygous genotypes increases the AF discrepancy from the reference panel, the merge is rejected. This ensures merging is performed only when it genuinely improves genotype accuracy.
-
-Since this step require estmating AF and HWE, please only run it on population VCFs.
