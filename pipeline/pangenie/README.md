@@ -58,13 +58,15 @@ python /path/to/collapse-bubble/scripts/collapse_bubble.py \
 -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz \
 --map mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping
 
+# sort
+# PanGenie biallelic VCF: mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 bcftools sort \
 -m 4G -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz \
 mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 
 # annotate graph VCF with collapsed ID
-# this can be used as PanGenie reference Graph VCF
+# PanGenie graph VCF: mc.pangenie.collapse_id.vcf.gz
 python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
 --graph-vcf mc.pangenie.sort.vcf.gz \
 --wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
@@ -76,9 +78,64 @@ tabix mc.pangenie.collapse_id.vcf.gz
 
 ## Merge duplicates in biallelic PanGenie output
 
+When converting PanGenie's results to biallelic, similar SVs (i.e., merged by `collapse_bubble.py`) within the same bubble will be merged into a single record:
+
+```
+Input:
+T TAAA,TAAAA  0/0  0/1  1/2
+
+Original PanGenie pipeline output:
+T TAAA        0/0  0/1  1/0
+T TAAAA       0/0  0/0  0/1
+
+Collapse-bubble + PanGenie output:
+T TAAA        0/0  0/1  1/1
+```
+
+However, if similar SVs reside in different bubbles, duplicated VCF records will be generated:
+```
+Input:
+T TAAA         0/0  0/1  1/1
+T TAAAA        0/0  0/1  0/0
+
+Original PanGenie pipeline output:
+T TAAA         0/0  0/1  1/1
+T TAAAA        0/0  0/1  0/0
+
+Collapse-bubble + PanGenie output:
+T TAAA         0/0  0/1  1/1
+T TAAA         0/0  0/1  0/0
+```
+
+The duplicated records can be merged by `merge_duplicates_pangenie.py`:
+
 ```
 python /path/to/collapse-bubble/pipeline/pangenie/merge_duplicates_pangenie.py \
 -i pangenie.biallelic.vcf.gz \
 -o pangenie.biallelic.merge_dup.vcf.gz \
 -r mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 ```
+
+This script can merge heterozygous genotypes into homozygous if possible, for example:
+
+```
+Input:
+T TAAA         0/0  0/1  1/1
+T TAAA         0/0  0/1  0/0
+
+merge_duplicates_pangenie.py output:
+T TAAA         0/0  1/1  1/1
+```
+
+Merging heterozygous genotypes is not suitable for all cases. If two bubbles share similar unique k-mers, PanGenie may genotype some SVs redundantly. Incorrectly merging two redundant heterozygous genotypes into one homozygous genotype would introduce errors. To determine whether merging is appropriate, we apply the following quality checks:
+
+1. **Conflict check**: If the proportion of conflicting genotypes between two candidate SVs exceeds the threshold `--max-conflict`, the genotypes are not merged.
+```
+T TAAA    0/1  1/1  1/1
+T TAAA    0/1  0/0  1/0
+Conflict: No   No   Yes
+```
+
+2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is generally not required based on our test.
+
+3. **Frequency check**: After merging, we compare the resulting AF against the reference panel frequencies (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). If merging heterozygous genotypes increases the AF discrepancy from the reference panel, the merge is rejected. This ensures merging is performed only when it genuinely improves genotype accuracy.
