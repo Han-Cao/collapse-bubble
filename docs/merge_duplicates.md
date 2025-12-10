@@ -41,12 +41,12 @@ Here, we get a non-overlapping, deduplicated VCF.
 When concatenating phased alleles, it requires that:
 
 1. The input VCF should not have any overlapping alleles on the same haplotype before `bcftools norm`
-2. The input VCF should be sorted by only chr and position after `bcftools norm`.
+2. The input VCF should be sorted by only chr and position (i.e., stable sort) after `bcftools norm`.
 
 These ensure when 2 alleles are found at the same position, all variants except the first one must be left aligned to this position. Therefore, we can concatenate indels to the first variant to reconstruct the original haplotype. This makes it possbible to concatenate alleles without querying reference genome.
 
 ### Important note:
-Sorting by `chr` and  `pos` only can be done using `bcftools v1.7` or earlier (see bcftools issue #756). For newer `bcftools`, variants are sorted by `chr`, `pos`, `ref`, `alt`. The following bash script can sort  by `chr` and `pos` only:
+`bcftools sort` does not guarantee stable VCF sort across different versions (see `bcftools` issue #756, PR #2252). To ensure stable sort, please use:
 
 ```
 (bcftools view -h input.vcf.gz ; bcftools view -H input.vcf.gz | sort -s -k1,1d -k2,2n) | bgzip > output.vcf.gz

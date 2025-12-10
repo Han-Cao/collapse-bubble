@@ -9,12 +9,6 @@ from collections import defaultdict
 
 import pysam
 
-parser = argparse.ArgumentParser(prog='annotate_var_id.py', description='Annotate and assign unique variant ID for pangenome VCF')
-parser.add_argument('-i', '--input', metavar='VCF', help='Input VCF', required=True)
-parser.add_argument('-o', '--output', metavar='VCF', help='Output VCF', required=True)
-parser.add_argument('--suffix-sep', default=None, type=str,
-                    help='Separator between bubble ID and suffix, e.g., "_" for vcfwave processed VCF (default: None)')
-
 
 def get_var_type(record: pysam.VariantRecord) -> str:
     len_ref = len(record.ref)
@@ -34,18 +28,20 @@ def get_var_type(record: pysam.VariantRecord) -> str:
             return 'COMPLEX'
 
 
-def main(input: str, output: str, suffix_sep) -> None:
+def main() -> None:
 
-    invcf = pysam.VariantFile(input, 'rb')
+    args = parse_args()
+
+    invcf = pysam.VariantFile(args.input, 'rb')
     header = invcf.header
     header.add_line('##INFO=<ID=BUBBLE_ID,Number=1,Type=String,Description="ID of pangenome bubble">')
-    outvcf = pysam.VariantFile(output, 'w', header=header)
+    outvcf = pysam.VariantFile(args.output, 'w', header=header)
 
     id_dict = defaultdict(int)
 
     for record in invcf:
-        if suffix_sep is not None:
-            bubble_id = record.id.rsplit(suffix_sep, 1)[0]
+        if args.suffix_sep is not None:
+            bubble_id = record.id.rsplit(args.suffix_sep, 1)[0]
         else:
             bubble_id = record.id
 
@@ -64,6 +60,18 @@ def main(input: str, output: str, suffix_sep) -> None:
     invcf.close()
     outvcf.close()
 
-if __name__ == '__main__':
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog='annotate_var_id.py', description='Annotate and assign unique variant ID for pangenome VCF')
+    parser.add_argument('-i', '--input', metavar='VCF', help='Input VCF', required=True)
+    parser.add_argument('-o', '--output', metavar='VCF', help='Output VCF', required=True)
+    parser.add_argument('--suffix-sep', default=None, type=str,
+                        help='Separator between bubble ID and suffix, e.g., "_" for vcfwave processed VCF (default: None)')
+    
     args = parser.parse_args()
-    main(args.input, args.output, args.suffix_sep)
+
+    return args
+
+
+if __name__ == '__main__':
+    main()

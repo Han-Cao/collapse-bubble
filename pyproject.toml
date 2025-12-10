@@ -1,0 +1,25 @@
+[project]
+name = "collapse-bubble"
+version = "0.1.1"
+description = "Pangenome structural variations merging and overlapping variant merging"
+authors = [
+    { name = "Han Cao", email = "hcaoad@connect.ust.hk" },
+]
+dependencies = [
+    "truvari==5.3.0",
+    "pysam",
+    "pandas",
+    "numpy"
+]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-order",
+    "pytest-cov"
+]
+
+[tool.coverage.run]
+patch = ["subprocess"]
