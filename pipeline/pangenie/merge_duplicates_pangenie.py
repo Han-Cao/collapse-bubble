@@ -130,7 +130,7 @@ def exact_hwe(obs_hom1: int, obs_hets: int, obs_hom2: int) -> float:
     return p
 
 
-def conflict_ratio(ac_arr1: np.ndarray, ac_arr2: np.ndarray) -> bool:
+def conflict_ratio(ac_arr1: np.ndarray, ac_arr2: np.ndarray) -> float:
     """ Calculate the ratio of conflicting genotypes (1/1 vs 1/-) """
 
     ac_arr_sum = ac_arr1 + ac_arr2
