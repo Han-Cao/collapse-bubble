@@ -22,9 +22,9 @@ vcfbub -l 0 -r 100000 -i mc.raw.vcf.gz > mc.vcfbub.r100k.vcf
 
 # PanGenie's decomposition
 python3 /path/to/pangenie/scripts/annotate_vcf.py \
--vcf mc.vcfbub.r100k.vcf \
--gfa mc.gfa \
--o mc.pangenie
+  -vcf mc.vcfbub.r100k.vcf \
+  -gfa mc.gfa \
+  -o mc.pangenie
 
 # sort graph VCF
 bcftools sort -o mc.pangenie.sort.vcf mc.pangenie.vcf
@@ -34,8 +34,9 @@ bcftools norm -f ref.fa -Ou mc.pangenie.biallelic.vcf | bcftools sort --write-in
 
 # annotate ID for biallelic VCF
 python /path/to/collapse-bubble/scripts/annotate_var_id.py \
--i mc.pangenie.biallelic.sort.vcf.gz \
--o mc.pangenie.biallelic.uniqid.vcf.gz
+  -i mc.pangenie.biallelic.sort.vcf.gz \
+  -o mc.pangenie.biallelic.uniqid.vcf.gz
+
 tabix mc.pangenie.biallelic.uniqid.vcf.gz
 
 # Pangenie's decomposition method cannot decompose all variants
@@ -49,33 +50,35 @@ bcftools sort --write-index -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf
 
 # merge duplicates and overlap
 python /path/to/collapse-bubble/scripts/merge_duplicates.py \
--i mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
--o mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
--c repeat \
---track ID \
+  -i mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
+  -o mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+  -c repeat \
+  --track ID
+
 tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz
 
 # SV merging
 python /path/to/collapse-bubble/scripts/collapse_bubble.py \
--i mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz \
--o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz \
---map mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping
+  -i mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz \
+  -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz \
+  --map mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping
 
 # sort
 # PanGenie biallelic VCF: mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 bcftools sort \
--m 4G -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz \
-mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
+  -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz \
+  mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
+
 tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 
 # annotate graph VCF with collapsed ID
 # PanGenie graph VCF: mc.pangenie.collapse_id.vcf
 python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
---graph-vcf mc.pangenie.sort.vcf.gz \
---wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
---mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
---mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
--o mc.pangenie.collapse_id.vcf
+  --graph-vcf mc.pangenie.sort.vcf.gz \
+  --wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
+  --mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+  --mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
+  -o mc.pangenie.collapse_id.vcf
 
 # Prepare ID annotation
 bcftools query -f '%CHROM\t%POS\t%INFO/ID\n' mc.pangenie.collapse_id.vcf | \
@@ -84,14 +87,14 @@ tabix -s1 -b2 -e2 mc.pangenie.collapse_id.txt.gz
 
 # prepare PanGenie index
 PanGenie-index \
--v mc.pangenie.sort.vcf \
--r ref.fa \
--o mc.pangenie.index
+  -v mc.pangenie.sort.vcf \
+  -r ref.fa \
+  -o mc.pangenie.index
 
 PanGenie-index \
--v mc.pangenie.collapse_id.vcf \
--r ref.fa \
--o mc.pangenie.collapse_id.index
+  -v mc.pangenie.collapse_id.vcf \
+  -r ref.fa \
+  -o mc.pangenie.collapse_id.index
 ```
 
 ## Run PanGenie
@@ -100,10 +103,10 @@ Run PanGenie, and convert to biallelic VCF with or without SV merging:
 ```bash
 # Genotyping
 PanGenie \
--i <(zcat fastq.gz) \
--f mc.pangenie.index \
--o sample.pangenie.vcf \
--s sample
+  -i <(zcat fastq.gz) \
+  -f mc.pangenie.index \
+  -o sample.pangenie.vcf \
+  -s sample
 
 # convert to biallelic VCF without SV merging
 cat sample.pangenie.vcf | \
@@ -113,12 +116,12 @@ bgzip > sample.pangenie.biallelic.raw.vcf.gz
 # convert to biallelic VCF with SV merging
 # this need to annotate pangenie output with collapsed ID
 bcftools annotate \
--a mc.pangenie.collapse_id.txt.gz \
--c CHROM,POS,INFO/ID \
---pair-logic "all" \
-sample.pangenie.vcf | \
+  -a mc.pangenie.collapse_id.txt.gz \
+  -c CHROM,POS,INFO/ID \
+  --pair-logic "all" \
+  sample.pangenie.vcf | \
 python3 convert-to-biallelic.py \
-mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
+  mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
 bgzip > sample.pangenie.biallelic.collapse.vcf.gz
 
 # merge across samples
@@ -132,15 +135,15 @@ If you don't want the raw VCF without SV merging, you can directly run from the 
 ```bash
 # Genotyping
 PanGenie \
--i <(zcat fastq.gz) \
--f mc.pangenie.collapse_id.index \
--o sample.pangenie.vcf \
--s sample
+  -i <(zcat fastq.gz) \
+  -f mc.pangenie.collapse_id.index \
+  -o sample.pangenie.vcf \
+  -s sample
 
 # convert to biallelic VCF with SV merging
 cat sample.pangenie.vcf | \
 python3 convert-to-biallelic.py \
-mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
+  mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz | \
 bgzip > sample.pangenie.biallelic.collapse.vcf.gz
 
 # merge across samples
@@ -182,13 +185,13 @@ T TAAA         0/0  0/1  0/0
 
 The duplicated records can be merged by `merge_duplicates_pangenie.py`:
 
-```
+```bash
 # IMPORTANT:
 # this step relies on estimated AF and HWE, please only run it on population VCFs.
 python /path/to/collapse-bubble/pipeline/pangenie/merge_duplicates_pangenie.py \
--i population.pangenie.biallelic.collapse.vcf.gz \
--o population.pangenie.biallelic.collapse.merge_dup.vcf.gz \
--r mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
+  -i population.pangenie.biallelic.collapse.vcf.gz \
+  -o population.pangenie.biallelic.collapse.merge_dup.vcf.gz \
+  -r mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
 ```
 
 This script can merge heterozygous genotypes into homozygous if possible, for example:
