@@ -11,10 +11,13 @@ Input
 - `Minigraph-Cactus` GFA: `mc.gfa`
 
 Output
-- Graph VCF with collapsed ID annotation: `mc.pangenie.collapse_id.vcf.gz`
+- PanGenie graph VCF: `mc.pangenie.sort.vcf`
+- PanGenie graph VCF with collapsed ID annotation: `mc.pangenie.collapse_id.vcf.gz`
+- Biallelic VCF: `pangenie.biallelic.sort.vcf.gz`
 - Collapsed biallelic VCF: `mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`
-- ID annotation file: `mc.pangenie.collapse_id.txt.gz`
+- Collapsed ID annotation file: `mc.pangenie.collapse_id.txt.gz`
 - PanGenie index: `mc.pangenie.index`
+- PanGenie index with collapsed ID annotation: `mc.pangenie.collapse_id.index`
 
 ```bash
 # vcfbub
@@ -29,6 +32,7 @@ python3 /path/to/pangenie/scripts/annotate_vcf.py \
 # sort graph VCF
 bcftools sort -o mc.pangenie.sort.vcf mc.pangenie.vcf
 bcftools sort --write-index -Oz -o mc.pangenie.sort.vcf.gz mc.pangenie.sort.vcf
+
 # sort and normalize biallelic VCF
 bcftools norm -f ref.fa -Ou mc.pangenie.biallelic.vcf | bcftools sort --write-index -Oz -o mc.pangenie.biallelic.sort.vcf.gz
 
@@ -51,7 +55,7 @@ bcftools sort --write-index -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf
 # merge duplicates and overlap
 python /path/to/collapse-bubble/scripts/merge_duplicates.py \
   -i mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
-  -o mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+  -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz \
   -c repeat \
   --track ID
 
@@ -64,7 +68,6 @@ python /path/to/collapse-bubble/scripts/collapse_bubble.py \
   --map mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping
 
 # sort
-# PanGenie biallelic VCF: mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 bcftools sort \
   -Oz -o mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz \
   mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz
@@ -72,17 +75,17 @@ bcftools sort \
 tabix mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.sort.vcf.gz
 
 # annotate graph VCF with collapsed ID
-# PanGenie graph VCF: mc.pangenie.collapse_id.vcf
 python /path/to/collapse-bubble/pipeline/pangenie/annotate_graph_id.py \
   --graph-vcf mc.pangenie.sort.vcf.gz \
   --wave-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.vcf.gz \
-  --mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.sort.merge_dup.vcf.gz \
+  --mergedup-vcf mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.vcf.gz \
   --mapping mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.mapping.collapse.txt \
   -o mc.pangenie.collapse_id.vcf
 
-# Prepare ID annotation
+# prepare collapsed ID annotation
 bcftools query -f '%CHROM\t%POS\t%INFO/ID\n' mc.pangenie.collapse_id.vcf | \
 bgzip > mc.pangenie.collapse_id.txt.gz
+
 tabix -s1 -b2 -e2 mc.pangenie.collapse_id.txt.gz
 
 # prepare PanGenie index
@@ -91,6 +94,7 @@ PanGenie-index \
   -r ref.fa \
   -o mc.pangenie.index
 
+# prepare PanGenie index with collapsed ID annotation
 PanGenie-index \
   -v mc.pangenie.collapse_id.vcf \
   -r ref.fa \
@@ -205,7 +209,7 @@ merge_duplicates_pangenie.py output:
 T TAAA         0/0  1/1  1/1
 ```
 
-Merging heterozygous genotypes is not suitable for all cases. If two bubbles share similar unique k-mers, PanGenie may genotype some SVs redundantly. Incorrectly merging two redundant heterozygous genotypes into one homozygous genotype would introduce errors. To determine whether merging is appropriate, we apply the following quality checks:
+Merging heterozygous genotypes is not appropriate for all cases. If two bubbles share similar unique k-mers, PanGenie may genotype some SVs redundantly. Incorrectly merging two redundant heterozygous genotypes into one homozygous genotype would introduce errors. To determine whether merging is appropriate, we apply the following quality checks:
 
 1. **Conflict check**: If the proportion of conflicting genotypes between two candidate SVs exceeds the threshold `--max-conflict`, the genotypes are not merged.
 ```
@@ -214,6 +218,6 @@ T TAAA    0/1  0/0  1/0
 Conflict: No   No   Yes
 ```
 
-2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is generally not required based on our test.
+2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is not suggested.
 
 3. **Frequency check**: After merging, we compare the resulting AF against the reference panel frequencies (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). If merging heterozygous genotypes increases the AF discrepancy from the reference panel, the merge is rejected. This ensures merging is performed only when it genuinely improves genotype accuracy.
