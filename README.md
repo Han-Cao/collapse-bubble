@@ -152,7 +152,7 @@ options:
 
 ### 2. Merge overlapping variants
 
-After variant decomposition and left align, the VCF contains overlapping variants at the same position (mostly SNPs and small INDELs). For example:
+After variant decomposition and left align, the VCF can contain overlapping variants at the same position. For example:
 
 ```
 chr1   100   var1   C   G     1|0
@@ -162,7 +162,7 @@ chr1   100   var4   C   CAA   1|0
 ```
 In this example:
 - `var1` and `var2` are duplicates, as they share the same `POS`, `REF`, and `ALT`. This is mainly due to variant decomposition.
-- `var1` and `var3`/`var4` overlap on the **first haplotype**, as there are three alternative alleles at the same `POS`. This is caused by left align.
+- `var1` and `var3`/`var4` overlap on the **first haplotype**, as there are three alternative alleles at the same `POS`. This is due to left align.
 
 `merge_duplicates.py` can clean up duplicated and overlapping variants:
 
@@ -176,7 +176,7 @@ python scripts/merge_duplicates.py \
 
 - It first concatenates overlapping **tandem repeats** (specified by `-c repeat`) using the algorithm described in the [documentation](docs/merge_duplicates.md). For example, `var3` and `var4` are concatenated into `C CAAAA`.
 - After concatenating all overlapping variants, it merges duplicates into a single record and also updates the phased genotypes.
-- `-t ID` tracks how the overlapping variants are concatenated (`INFO/CONCAT`) and how duplicates are merged (`INFO/DUP`). These information is useful for downstream SV merging.
+- `-t ID` tracks how the overlapping variants are concatenated (`INFO/CONCAT`) and how duplicates are merged (`INFO/DUP`). These information is required for downstream SV merging.
 
 Output:
 ```
@@ -184,7 +184,7 @@ chr1   100   var1   C   G     1|1
 chr1   100   chr1:100_0   C   CAAAA 1|0
 ```
 
-**Note**: When using `merge_duplicates.py -c position`, it concatenates any overlapping variants at the same position. This method reconstructs the local haplotypes and significantly increasing polymorphism, which may not be suitable for merging tandem repeats. Additionally, it requires the input VCF sorted by `CHROM` and `POS` only (not guaranteed by recent `bcftools`). Please see [documentation](docs/merge_duplicates.md) for more details.
+**Note**: When using `merge_duplicates.py -c position`, it concatenates any overlapping variants at the same position. This method reconstructs the local haplotypes and significantly increasing polymorphism, which may not be suitable for SV merging. Additionally, it requires the input VCF sorted by `CHROM` and `POS` only (not guaranteed by recent `bcftools`, see [documentation](docs/merge_duplicates.md) for details). Since `merge_duplicates.py -c position` is included in the [Minigraph-Cactus pipeline](https://github.com/ComparativeGenomicsToolkit/cactus/blob/master/doc/pangenome.md) when `--vcfwave` is used, it is suggested to directly use the output VCF from `Minigraph-Cactus` if you are interested in this feature.
 
 
 **Arguments**:
@@ -221,12 +221,12 @@ This will generate 3 output files:
 
 **1. VCF**:
 
-The output VCF is not sorted and has merged variants and genotypes. Similar SVs are merged into the most common one. The following fields of the merged SV are added:
+The output VCF (unsorted) merges similar SV records and genotypes into one representative SV, which is selected by the one with highest frequency. Moreover, the following `INFO` fields are added to the merged record:
 
-- `INFO/ID_LIST`: comma-separated list of variants merged into this variants
+- `INFO/ID_LIST`: comma-separated list of SVs merged into this SV
 - `INFO/TYPE`: type of variant (SNP, MNP, INS, DEL, INV, COMPLEX)
-- `INFO/REFLEN`: len(ref)
-- `INFO/SVLEN`: len(alt) - len(ref)
+- `INFO/REFLEN`: len(REF)
+- `INFO/SVLEN`: len(ALT) - len(REF)
 
 For example:
 ```
@@ -240,7 +240,7 @@ chr1  10039  >123>456.INS.2  A  ATTTTTG  AC=5;AN=6;AF=0.833;BUBBLE_ID=>123>456;I
 
 **2. SV merging table**:
 
-A TSV file mapping original SVs (`Variant_ID`) to merged SVs (`Collapse_ID`). For example:
+A TSV file mapping original SVs (`Variant_ID`) to representative SVs (`Collapse_ID`). For example:
    
 | Chrom | Position | Bubble_ID          | Variant_ID                      | Collapse_ID                     | PctSeqSimilarity | PctSizeSimilarity | PctRecOverlap | SizeDiff | StartDistance | EndDistance | TruScore |   |   |
 |-------|----------|--------------------|---------------------------------|---------------------------------|------------------|-------------------|---------------|----------|---------------|-------------|----------|---|---|
@@ -250,13 +250,15 @@ A TSV file mapping original SVs (`Variant_ID`) to merged SVs (`Collapse_ID`). Fo
 | chr22 | 16387000 | >38058649>38058909 | >38058649>38058909.INS.56       | >38058649>38058909.INS.55       | 0.996            | 1.000             | 1.000         | 0        | 0             | 0           | 99.9     |   |   |
 | chr22 | 16387057 | >38058649>38058909 | >38058649>38058909.INS.81       | >38058649>38058909.COMPLEX.78_2 | 1.000            | 1.000             | 1.000         | 0        | 0             | 0           | 100.0    |   |   |
 
-In this table, the first row indicates the SV `>38058649>38058909.DEL.33` at `chr22:16386947` from bubble `>38058649>38058909` is merged into `>38058649>38058909.DEL.34`. The results of SV comparison performed by `Truvari` are included in columns from `PctSeqSimilarity` to `TruScore`.
+In this table, the first row means the SV `>38058649>38058909.DEL.33` at `chr22:16386947` from bubble `>38058649>38058909` is merged into `>38058649>38058909.DEL.34`. The results of SV comparison performed by `Truvari` are included in columns from `PctSeqSimilarity` to `TruScore`.
 
-Additionally, VCF INFO fields can be included as separate columns by specifying `--info`. If `--info SVLEN` is used, the output SVLEN in the tsv file will be REFLEN for COMPLEX and INV to indicate the value used for comparison. While in the output VCF, INFO/SVLEN is always calculated by `len(alt) - len(ref)`.
+Other VCF `INFO` fields can be included as additional columns by specifying `--info`. 
+
+**Note**: If `--info SVLEN` is used, the output SVLEN in the tsv file will be REFLEN for COMPLEX and INV to indicate the actual value used for comparison. While in the output VCF, INFO/SVLEN is always calculated by `len(alt) - len(ref)`.
 
 **3. Similar SV pairs with conflicting genotypes**
 
-A TSV file listing SVs (`Variant_ID`) that are similar to another SV (`Collapse_ID`) but have conflicting genotypes.
+A TSV file listing SVs (`Variant_ID`) that pass SV merging threshold but are not merged into the representative SV (`Collapse_ID`) due to conflicting genotypes.
 
 **Arguments**:
 
@@ -288,16 +290,11 @@ Other arguments:
 
 ## Todo list
 
-Major:
 - [ ] workflow script to run all analysis in the pipeline.
-- [x] new SV merging pipeline that concatenates overlapping variants before SV merging, which will improve variant merging for tandem repeats and more compatible with the latest MC pipeline.
-
-Minor:
-- [x] update AC, AN, AF in the output VCF
-- [x] support ploidy > 2
 
 
 ## Acknowledgement
 
 - We thank Adam English for [Truvari](https://github.com/ACEnglish/truvari) and for sharing the insightful [script](https://github.com/ACEnglish/truvari/issues/228#issuecomment-2308535253) that inspired `collapse_bubble.py`.
 - We thank Glenn Hickey for valuable suggestions on merging overlapping variants.
+
