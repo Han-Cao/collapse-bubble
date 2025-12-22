@@ -3,6 +3,8 @@
 # SV merging for pangenome VCF
 # Last update: 30-Jun-2025
 # Author: Han Cao
+# Fix date: 22-Dec-2025
+# Fixed by Quanyu Chen: Implemented cluster merging logic to fix AssertionError
 
 import logging
 import argparse
@@ -55,7 +57,7 @@ class BubbleClusters:
         """ Get number of variants in a cluster """
 
         return self.cluster_nvar[cluster_id]
-     
+      
 
     def retrieve_svtype(self, variant: pysam.VariantRecord) -> str:
         """ Get SVTYPE of a variant """
@@ -126,6 +128,10 @@ class BubbleClusters:
             
             # single bubble cluster
             if len(overlap_bubbles) == 0:
+                # If this bubble was already clustered (via a previous merge), skip it
+                if self.bubbles[b_id]['cluster'] is not None:
+                    continue
+
                 self.bubbles[b_id]['cluster'] = cluster_id
                 self.cluster[cluster_id].add(b_id)
                 cluster_id += 1
@@ -135,25 +141,46 @@ class BubbleClusters:
                 # find if any bubble already clustered
                 exist_cluster = []
                 cluster_bubbles = [b_id] + overlap_bubbles
+                
+                # Check current cluster status of all involved bubbles
                 for id in cluster_bubbles:
                     if self.bubbles[id]['cluster'] is not None:
                         exist_cluster.append(self.bubbles[id]['cluster'])
 
                 # create a new cluster
                 unique_cluster = list(set(exist_cluster))
+                
                 if len(unique_cluster) == 0:
                     for id in cluster_bubbles:
                         self.bubbles[id]['cluster'] = cluster_id
                     self.cluster[cluster_id].update(cluster_bubbles)
                     cluster_id += 1
                 
-                # add to existing cluster
+                # add to existing cluster (Merge Logic Implemented Here)
                 else:
-                    # already clustered bubbles must in the same cluster
-                    assert len(unique_cluster) == 1
+                    # Pick the first cluster ID as the target to merge into
+                    target_c_id = unique_cluster[0]
+                    
+                    # If there are multiple existing clusters, we must merge them
+                    if len(unique_cluster) > 1:
+                        for other_c_id in unique_cluster[1:]:
+                            # Get all bubbles from the other cluster
+                            bubbles_to_move = self.cluster[other_c_id]
+                            
+                            # Move bubbles to target cluster set
+                            self.cluster[target_c_id].update(bubbles_to_move)
+                            
+                            # Update the cluster ID in the bubbles dictionary
+                            for move_b_id in bubbles_to_move:
+                                self.bubbles[move_b_id]['cluster'] = target_c_id
+                            
+                            # Remove the old cluster
+                            del self.cluster[other_c_id]
+                    
+                    # Finally, assign the current batch of bubbles to the target cluster
                     for id in cluster_bubbles:
-                        self.bubbles[id]['cluster'] = unique_cluster[0]
-                    self.cluster[unique_cluster[0]].update(cluster_bubbles)
+                        self.bubbles[id]['cluster'] = target_c_id
+                    self.cluster[target_c_id].update(cluster_bubbles)
         
         # test only: check all bubbles have been clustered
         for b_id in self.bubbles.keys():
@@ -442,7 +469,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
         keep_vars.append(collapse_var)
         drop_set = set(drop_idx)
         var_remain = [x for i, x in enumerate(var_remain) if i not in drop_set]
-           
+            
     return keep_vars, collapse_dict, match_map, conflict_map
 
 
@@ -745,7 +772,7 @@ def main() -> None:
     new_header = add_header(invcf.header)
     bubble_clusters = parse_vcf(invcf, args.chr, args.min_len)
 
-    # collapse VCF   
+    # collapse VCF    
     invcf_iter = get_vcf_iter(invcf, args.chr)
     info_lst = [] if args.info is None else args.info.split(',')
 
@@ -785,15 +812,15 @@ def parse_args() -> argparse.Namespace:
 
     io_arg = parser.add_argument_group('Input / Output arguments')
     io_arg.add_argument('-i', '--invcf', metavar='VCF', required=True, 
-                       help='Input VCF')
+                        help='Input VCF')
     io_arg.add_argument('-o', '--outvcf', metavar='VCF', required=True, 
-                       help='Output VCF')
+                        help='Output VCF')
     io_arg.add_argument('-m', '--map', metavar='PREFIX', type=str, required=True,
-                       help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
+                        help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
     io_arg.add_argument('--chr', metavar='CHR', type=str, default=None,
-                       help='chromosome to work on, all if not specified. Default: %(default)s')
+                        help='chromosome to work on, all if not specified. Default: %(default)s')
     io_arg.add_argument('--info', metavar='TAG', type=str, default=None,
-                       help='Comma-separated INFO/TAG list to include in the output map. Default: %(default)s')
+                        help='Comma-separated INFO/TAG list to include in the output map. Default: %(default)s')
 
     collapse_arg = parser.add_argument_group('Collapse arguments')
     collapse_arg.add_argument('-l', '--min-len', metavar='50', type=int, default=50,
@@ -809,7 +836,7 @@ def parse_args() -> argparse.Namespace:
     
     other_arg = parser.add_argument_group('Other arguments')
     other_arg.add_argument('--debug', action='store_true', 
-                          help='Debug mode')
+                           help='Debug mode')
     
     args = parser.parse_args()
 
