@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # SV merging for pangenome VCF
-# Last update: 30-Jun-2025
+# Last update: 22-Dec-2025
 # Author: Han Cao
 
 import logging
@@ -21,6 +21,7 @@ class BubbleClusters:
     def __init__(self) -> None:
 
         self.bubbles = {} # bubble_id -> {'id': [var_ids], 'svtype': [var_svtypes], 'cluster': cluster_id}
+        self.bubbles_id = [] # list of bubble_ids, this keep the bubble order in the VCF
         self.cluster = defaultdict(set) # cluster_id -> set of bubble_ids
         self.cluster_vars = {} # cluster_id -> {'bubble_id': [var_ids], '_MULTI': [var_ids]}
         self.cluster_nvar = {} # cluster_id -> number of variants
@@ -107,6 +108,7 @@ class BubbleClusters:
         for b_id in bubble_ids:
             if b_id not in self.bubbles:
                 self.bubbles[b_id] = {'id': [variant.id], 'svtype': [svtype], 'cluster': None}
+                self.bubbles_id.append(b_id)
             else:
                 # check unique id
                 if variant.id in self.bubbles[b_id]['id']:
@@ -119,7 +121,7 @@ class BubbleClusters:
         """ Cluster bubbles """
 
         cluster_id = 0
-        for b_id in self.bubbles.keys():
+        for b_id in self.bubbles_id:
 
             # find overlap bubbles (only bubbles with SVs are included)
             overlap_bubbles = [x for x in self.overlaps[b_id] if x in self.bubbles]
@@ -785,31 +787,31 @@ def parse_args() -> argparse.Namespace:
 
     io_arg = parser.add_argument_group('Input / Output arguments')
     io_arg.add_argument('-i', '--invcf', metavar='VCF', required=True, 
-                       help='Input VCF')
+                        help='Input VCF')
     io_arg.add_argument('-o', '--outvcf', metavar='VCF', required=True, 
-                       help='Output VCF')
+                        help='Output VCF')
     io_arg.add_argument('-m', '--map', metavar='PREFIX', type=str, required=True,
-                       help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
+                        help='Write collapsed and conflicting SV tables to PREFIX.collapse.txt and PREFIX.conflict.txt.')
     io_arg.add_argument('--chr', metavar='CHR', type=str, default=None,
-                       help='chromosome to work on, all if not specified. Default: %(default)s')
+                        help='chromosome to work on, all if not specified. Default: %(default)s')
     io_arg.add_argument('--info', metavar='TAG', type=str, default=None,
-                       help='Comma-separated INFO/TAG list to include in the output map. Default: %(default)s')
+                        help='Comma-separated INFO/TAG list to include in the output map. Default: %(default)s')
 
     collapse_arg = parser.add_argument_group('Collapse arguments')
     collapse_arg.add_argument('-l', '--min-len', metavar='50', type=int, default=50,
-                             help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: %(default)s')
+                              help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: %(default)s')
     collapse_arg.add_argument('-r', '--refdist', metavar='500', type=int, default=500,
-                             help='Max reference location distance. Default: %(default)s')
+                              help='Max reference location distance. Default: %(default)s')
     collapse_arg.add_argument('-p', '--pctseq', metavar='0.9', type=float, default=0.9,
-                             help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: %(default)s')
+                              help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: %(default)s')
     collapse_arg.add_argument('-P', '--pctsize', metavar='0.9', type=float, default=0.9,
-                             help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: %(default)s')
+                              help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: %(default)s')
     collapse_arg.add_argument('-O', '--pctovl', metavar='0', type=float, default=0,
-                             help='Min pct reciprocal overlap. Default: %(default)s')
+                              help='Min pct reciprocal overlap. Default: %(default)s')
     
     other_arg = parser.add_argument_group('Other arguments')
     other_arg.add_argument('--debug', action='store_true', 
-                          help='Debug mode')
+                           help='Debug mode')
     
     args = parser.parse_args()
 
