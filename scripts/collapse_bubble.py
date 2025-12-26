@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # SV merging for pangenome VCF
-# Last update: 22-Dec-2025
+# Last update: 26-Dec-2025
 # Author: Han Cao
 
 import logging
@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+logger.propagate = False
 
 class BubbleClusters:
     """ Clusters of bubbles overlapping with the same tandem repeat """
@@ -78,6 +79,7 @@ class BubbleClusters:
             for b2 in self._pos_bubbles:
                 if b1 != b2:
                     self.overlaps[b1].add(b2)
+                    logger.debug(f'Overlap between {b1} and {b2} at {self._chr}:{self._pos}')
     
     
     def add_variant(self, variant: pysam.VariantRecord, svtype: str) -> None:
@@ -120,9 +122,9 @@ class BubbleClusters:
     def make_clusters(self) -> None:
         """ Cluster bubbles """
 
+        logger.debug('Making clusters...')
         cluster_id = 0
         for b_id in self.bubbles_id:
-
             # find overlap bubbles (only bubbles with SVs are included)
             overlap_bubbles = [x for x in self.overlaps[b_id] if x in self.bubbles]
             
@@ -131,19 +133,23 @@ class BubbleClusters:
                 self.bubbles[b_id]['cluster'] = cluster_id
                 self.cluster[cluster_id].add(b_id)
                 cluster_id += 1
+                logger.debug(f'Single-bubble cluster {cluster_id}: {b_id}')
             
             # multiple bubble cluster
             else:
+                logger.debug(f'Bubble {b_id} overlaps with {overlap_bubbles}')
                 # find if any bubble already clustered
                 exist_cluster = []
                 cluster_bubbles = [b_id] + overlap_bubbles
                 for id in cluster_bubbles:
                     if self.bubbles[id]['cluster'] is not None:
                         exist_cluster.append(self.bubbles[id]['cluster'])
+                        logger.debug(f'Cluster {self.bubbles[id]["cluster"]} already exists for bubble {id}')
 
                 # create a new cluster
                 unique_cluster = list(set(exist_cluster))
                 if len(unique_cluster) == 0:
+                    logger.debug(f'Multi-bubble cluster {cluster_id}: {cluster_bubbles}')
                     for id in cluster_bubbles:
                         self.bubbles[id]['cluster'] = cluster_id
                     self.cluster[cluster_id].update(cluster_bubbles)
@@ -152,6 +158,7 @@ class BubbleClusters:
                 # add to existing cluster
                 else:
                     # already clustered bubbles must in the same cluster
+                    logger.debug(f'Assigning {b_id} to existing cluster {unique_cluster}')
                     assert len(unique_cluster) == 1
                     for id in cluster_bubbles:
                         self.bubbles[id]['cluster'] = unique_cluster[0]
@@ -717,6 +724,24 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
     assert len(working_collapse) == 0
 
 
+def setup_logger(log_level) -> None:
+    """ Setup logger """
+    
+    # Clear and setup
+    logger.handlers.clear()
+    logger.setLevel(log_level)
+    
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '[%(asctime)s] - [%(levelname)s]: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return None
+
+
 def main() -> None:
 
     args = parse_args()
@@ -726,9 +751,7 @@ def main() -> None:
         log_level = logging.DEBUG
     else:
         log_level = logging.INFO
-    logging.basicConfig(level=log_level,
-                        format='[%(asctime)s] - [%(levelname)s]: %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_logger(log_level)
 
     # set up matcher
     p = truvari.VariantParams(refdist=args.refdist,
