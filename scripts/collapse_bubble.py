@@ -92,6 +92,10 @@ class BubbleClusters:
         if variant.pos == self._pos and variant.chrom == self._chr:
             self._pos_bubbles.update(bubble_ids)
 
+        # check if VCF is sorted
+        elif variant.pos < self._pos and variant.chrom == self._chr:
+            raise ValueError('Input VCF is not sorted')
+
         # all variants at the previous position has been processed
         else:
             # update overlaps 
