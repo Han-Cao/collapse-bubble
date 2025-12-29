@@ -218,6 +218,6 @@ T TAAA    0/1  0/0  1/0
 Conflict: No   No   Yes
 ```
 
-2. **HWE check**: If genotype merging is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is not suggested.
+2. **HWE check**: If merging heterozygous genotypes is not appropriate, it increases the discrepancy from HWE. We compute HWE p‑values for both the unmerged and merged scenarios. If `HWE_P(unmerge)` / `HWE_P(merge)` > `--hwe-ratio`, then merging is rejected. Since accurate genotypes should yield high HWE p‑values, a small `--hwe-ratio` is not suggested.
 
-3. **Frequency check**: After merging, we compare the resulting AF against the reference panel frequencies (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). If merging heterozygous genotypes increases the AF discrepancy from the reference panel, the merge is rejected. This ensures merging is performed only when it genuinely improves genotype accuracy.
+3. **Frequency check**: If merging heterozygous genotypes is not appropriate, it increases the AF discrepancy from the reference panel (`mc.pangenie.biallelic.uniqid.vcfwave.merge_dup.collapse.vcf.gz`). The merging is performed only if it decreases the AF discrepancy.
