@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 # SV merging for pangenome VCF
-# Last update: 30-Jun-2025
+# Last update: 29-Dec-2025
 # Author: Han Cao
-# Fix date: 22-Dec-2025
-# Fixed by Quanyu Chen: Implemented cluster merging logic to fix AssertionError
+# Contributor: Quanyu Chen
 
 import logging
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import pysam
 import truvari
@@ -16,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+logger.propagate = False
 
 class BubbleClusters:
     """ Clusters of bubbles overlapping with the same tandem repeat """
@@ -23,6 +23,7 @@ class BubbleClusters:
     def __init__(self) -> None:
 
         self.bubbles = {} # bubble_id -> {'id': [var_ids], 'svtype': [var_svtypes], 'cluster': cluster_id}
+        self.bubbles_id = [] # list of bubble_ids, this keep the bubble order in the VCF
         self.cluster = defaultdict(set) # cluster_id -> set of bubble_ids
         self.cluster_vars = {} # cluster_id -> {'bubble_id': [var_ids], '_MULTI': [var_ids]}
         self.cluster_nvar = {} # cluster_id -> number of variants
@@ -79,6 +80,22 @@ class BubbleClusters:
             for b2 in self._pos_bubbles:
                 if b1 != b2:
                     self.overlaps[b1].add(b2)
+                    logger.debug(f'Overlap between {b1} and {b2} at {self._chr}:{self._pos}')
+    
+
+    def _get_all_overlap(self, b_id: str) -> set:
+        """ Find all overlapping bubbles by BFS """
+
+        visited = {b_id}
+        queue = deque([b_id])
+        while queue:
+            current = queue.popleft()
+            for neighbor in self.overlaps.get(current, set()):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        return visited
     
     
     def add_variant(self, variant: pysam.VariantRecord, svtype: str) -> None:
@@ -90,6 +107,10 @@ class BubbleClusters:
         # collect bubbles at the same position
         if variant.pos == self._pos and variant.chrom == self._chr:
             self._pos_bubbles.update(bubble_ids)
+
+        # check if VCF is sorted
+        elif variant.pos < self._pos and variant.chrom == self._chr:
+            raise ValueError('Input VCF is not sorted')
 
         # all variants at the previous position has been processed
         else:
@@ -109,6 +130,7 @@ class BubbleClusters:
         for b_id in bubble_ids:
             if b_id not in self.bubbles:
                 self.bubbles[b_id] = {'id': [variant.id], 'svtype': [svtype], 'cluster': None}
+                self.bubbles_id.append(b_id)
             else:
                 # check unique id
                 if variant.id in self.bubbles[b_id]['id']:
@@ -120,67 +142,55 @@ class BubbleClusters:
     def make_clusters(self) -> None:
         """ Cluster bubbles """
 
+        logger.debug('Making clusters...')
         cluster_id = 0
-        for b_id in self.bubbles.keys():
-
+        for b_id in self.bubbles_id:
+            # skip if this bubble was already clustered
+            if self.bubbles[b_id]['cluster'] is not None:
+                continue
             # find overlap bubbles (only bubbles with SVs are included)
-            overlap_bubbles = [x for x in self.overlaps[b_id] if x in self.bubbles]
+            overlap_bubbles = [x for x in self._get_all_overlap(b_id) if x in self.bubbles]
             
             # single bubble cluster
             if len(overlap_bubbles) == 0:
-                # If this bubble was already clustered (via a previous merge), skip it
-                if self.bubbles[b_id]['cluster'] is not None:
-                    continue
-
+                logger.debug(f'Single-bubble cluster {cluster_id}: {b_id}')
                 self.bubbles[b_id]['cluster'] = cluster_id
                 self.cluster[cluster_id].add(b_id)
                 cluster_id += 1
             
             # multiple bubble cluster
             else:
+                logger.debug(f'Bubble {b_id} overlaps with {overlap_bubbles}')
                 # find if any bubble already clustered
+                # TODO: this should be useless when using BFS to cluster bubbles, consider removing
                 exist_cluster = []
                 cluster_bubbles = [b_id] + overlap_bubbles
                 
-                # Check current cluster status of all involved bubbles
                 for id in cluster_bubbles:
                     if self.bubbles[id]['cluster'] is not None:
                         exist_cluster.append(self.bubbles[id]['cluster'])
+                        logger.debug(f'Cluster {self.bubbles[id]["cluster"]} already exists for bubble {id}')
 
                 # create a new cluster
                 unique_cluster = list(set(exist_cluster))
                 
                 if len(unique_cluster) == 0:
+                    logger.debug(f'Multi-bubble cluster {cluster_id}: {cluster_bubbles}')
                     for id in cluster_bubbles:
                         self.bubbles[id]['cluster'] = cluster_id
                     self.cluster[cluster_id].update(cluster_bubbles)
                     cluster_id += 1
                 
-                # add to existing cluster (Merge Logic Implemented Here)
+                # add to existing cluster
+                # TODO: this should be useless when using BFS to cluster bubbles, consider removing
                 else:
-                    # Pick the first cluster ID as the target to merge into
-                    target_c_id = unique_cluster[0]
-                    
-                    # If there are multiple existing clusters, we must merge them
-                    if len(unique_cluster) > 1:
-                        for other_c_id in unique_cluster[1:]:
-                            # Get all bubbles from the other cluster
-                            bubbles_to_move = self.cluster[other_c_id]
-                            
-                            # Move bubbles to target cluster set
-                            self.cluster[target_c_id].update(bubbles_to_move)
-                            
-                            # Update the cluster ID in the bubbles dictionary
-                            for move_b_id in bubbles_to_move:
-                                self.bubbles[move_b_id]['cluster'] = target_c_id
-                            
-                            # Remove the old cluster
-                            del self.cluster[other_c_id]
-                    
-                    # Finally, assign the current batch of bubbles to the target cluster
+                    logger.warning(f'Bubble {b_id} is clustered 2 times, this should not happen!')
+                    # already clustered bubbles must in the same cluster
+                    logger.debug(f'Assigning {b_id} to existing cluster {unique_cluster}')
+                    assert len(unique_cluster) == 1
                     for id in cluster_bubbles:
-                        self.bubbles[id]['cluster'] = target_c_id
-                    self.cluster[target_c_id].update(cluster_bubbles)
+                        self.bubbles[id]['cluster'] = unique_cluster[0]
+                    self.cluster[unique_cluster[0]].update(cluster_bubbles)
         
         # test only: check all bubbles have been clustered
         for b_id in self.bubbles.keys():
@@ -424,7 +434,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
         for i in range(1, len(var_remain)):
             candidate_var = var_remain[i]
             res_match = collapse_var.match(candidate_var)
-            logger.debug(f'Direct compare {candidate_var.id} with {collapse_var.id}: {res_match.state}. ' + 
+            logger.debug(f'Directly compare {candidate_var.id} with {collapse_var.id}: {res_match.state}. ' + 
                          f'(seqsim:{res_match.seqsim}, sizesim:{res_match.sizesim}, ovlpct:{res_match.ovlpct})')
             if res_match.state:
                 # check haplotype consistency against collapsed SV
@@ -742,6 +752,24 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
     assert len(working_collapse) == 0
 
 
+def setup_logger(log_level) -> None:
+    """ Setup logger """
+    
+    # Clear and setup
+    logger.handlers.clear()
+    logger.setLevel(log_level)
+    
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '[%(asctime)s] - [%(levelname)s]: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return None
+
+
 def main() -> None:
 
     args = parse_args()
@@ -751,9 +779,7 @@ def main() -> None:
         log_level = logging.DEBUG
     else:
         log_level = logging.INFO
-    logging.basicConfig(level=log_level,
-                        format='[%(asctime)s] - [%(levelname)s]: %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_logger(log_level)
 
     # set up matcher
     p = truvari.VariantParams(refdist=args.refdist,
@@ -824,15 +850,15 @@ def parse_args() -> argparse.Namespace:
 
     collapse_arg = parser.add_argument_group('Collapse arguments')
     collapse_arg.add_argument('-l', '--min-len', metavar='50', type=int, default=50,
-                             help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: %(default)s')
+                              help='Minimum allele length of variants to be included, defined as max(len(alt), len(ref)). Default: %(default)s')
     collapse_arg.add_argument('-r', '--refdist', metavar='500', type=int, default=500,
-                             help='Max reference location distance. Default: %(default)s')
+                              help='Max reference location distance. Default: %(default)s')
     collapse_arg.add_argument('-p', '--pctseq', metavar='0.9', type=float, default=0.9,
-                             help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: %(default)s')
+                              help='Min percent sequence similarity (REF for DEL, ALT for other SVs). Default: %(default)s')
     collapse_arg.add_argument('-P', '--pctsize', metavar='0.9', type=float, default=0.9,
-                             help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: %(default)s')
+                              help='Min percent size similarity (SVLEN for INS, DEL; REFLEN for INV, COMPLEX). Default: %(default)s')
     collapse_arg.add_argument('-O', '--pctovl', metavar='0', type=float, default=0,
-                             help='Min pct reciprocal overlap. Default: %(default)s')
+                              help='Min pct reciprocal overlap. Default: %(default)s')
     
     other_arg = parser.add_argument_group('Other arguments')
     other_arg.add_argument('--debug', action='store_true', 
