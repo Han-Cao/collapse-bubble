@@ -94,6 +94,9 @@ class BubbleClusters:
                 if neighbor not in visited:
                     visited.add(neighbor)
                     queue.append(neighbor)
+        
+        # exclude self
+        visited.remove(b_id)
 
         return visited
     
