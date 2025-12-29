@@ -6,7 +6,7 @@
 
 import logging
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import pysam
 import truvari
@@ -81,6 +81,21 @@ class BubbleClusters:
                     self.overlaps[b1].add(b2)
                     logger.debug(f'Overlap between {b1} and {b2} at {self._chr}:{self._pos}')
     
+
+    def _get_all_overlap(self, b_id: str) -> set:
+        """ Find all overlapping bubbles by BFS """
+
+        visited = {b_id}
+        queue = deque([b_id])
+        while queue:
+            current = queue.popleft()
+            for neighbor in self.overlaps.get(current, set()):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        return visited
+    
     
     def add_variant(self, variant: pysam.VariantRecord, svtype: str) -> None:
         """ Add variant to bubble and check for overlaps """
@@ -130,14 +145,14 @@ class BubbleClusters:
         cluster_id = 0
         for b_id in self.bubbles_id:
             # find overlap bubbles (only bubbles with SVs are included)
-            overlap_bubbles = [x for x in self.overlaps[b_id] if x in self.bubbles]
+            overlap_bubbles = [x for x in self._get_all_overlap(b_id) if x in self.bubbles]
             
             # single bubble cluster
             if len(overlap_bubbles) == 0:
+                logger.debug(f'Single-bubble cluster {cluster_id}: {b_id}')
                 self.bubbles[b_id]['cluster'] = cluster_id
                 self.cluster[cluster_id].add(b_id)
                 cluster_id += 1
-                logger.debug(f'Single-bubble cluster {cluster_id}: {b_id}')
             
             # multiple bubble cluster
             else:
