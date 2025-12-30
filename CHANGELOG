@@ -1,0 +1,14 @@
+v0.1.2
+
+`collapse_bubble.py`
+- Cluster bubbles by BFS to fix complex regions. Thanks to Quanyu Chen (@yeeus)
+- Add more debug logging
+
+v0.1.1
+
+`collapse_bubble.py`
+- Change default collapse parameters to `-r 500 -p 0.9 -P 0.9 -O 0`
+- Slightly speed up
+
+`merge_duplicates.py`
+- Change the ID format of concatenated variants.
