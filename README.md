@@ -94,7 +94,7 @@ python scripts/merge_duplicates.py \
 -t ID
 
 ##### 3. Horizontal SV merging #####
-python collapse_bubble.py \
+python scripts/collapse_bubble.py \
 -i mc.biallele.uniq_id.vcfwave.sort.merge_dup.vcf.gz \
 -o mc.biallele.uniq_id.vcfwave.sort.merge_dup.merge_sv.vcf.gz \
 --map mc.biallele.uniq_id.vcfwave.sort.merge_dup.merge_sv.mapping
@@ -224,7 +224,7 @@ options:
 
 To perform SV merging, run `collapse_bubble.py`:
 ```
-python collapse_bubble.py \
+python scripts/collapse_bubble.py \
 -i mc.biallele.uniq_id.vcfwave.sort.merge_dup.vcf.gz \
 -o mc.biallele.uniq_id.vcfwave.sort.merge_dup.merge_sv.vcf.gz \
 --map mc.biallele.uniq_id.vcfwave.sort.merge_dup.merge_sv.mapping
