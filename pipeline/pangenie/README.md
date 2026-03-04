@@ -152,7 +152,6 @@ bgzip > sample.pangenie.biallelic.collapse.vcf.gz
 
 # merge across samples
 # this is necessary for merge_duplicates_pangenie.py
-bcftools merge *raw.vcf.gz -Oz -o population.pangenie.biallelic.raw.vcf.gz
 bcftools merge *collapse.vcf.gz -Oz -o population.pangenie.biallelic.collapse.vcf.gz
 ```
 
@@ -161,7 +160,7 @@ bcftools merge *collapse.vcf.gz -Oz -o population.pangenie.biallelic.collapse.vc
 When converting PanGenie's results to biallelic, similar SVs (i.e., merged by `collapse_bubble.py`) within the same bubble will be merged into a single record:
 
 ```
-Input:
+Input (1 bubble with 2 similar alleles):
 T TAAA,TAAAA  0/0  0/1  1/2
 
 Original PanGenie pipeline output:
@@ -174,7 +173,7 @@ T TAAA        0/0  0/1  1/1
 
 However, if similar SVs reside in different bubbles, duplicated VCF records will be generated:
 ```
-Input:
+Input (2 bubbles with 2 similar alleles):
 T TAAA         0/0  0/1  1/1
 T TAAAA        0/0  0/1  0/0
 
