@@ -49,7 +49,7 @@ jobs:
           python -m pip install .[dev]
 
       - name: Lint code with Ruff
-        run: ruff check --output-format=github --target-version=py${{ matrix.python-version }}
+        run: ruff check --output-format=github
         
       - name: Test with pytest
         run: |
