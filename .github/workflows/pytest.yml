@@ -8,10 +8,12 @@ on:
       paths-ignore:
         - '**.md'
         - '.gitignore'
+        - 'CHANGELOG'
     pull_request:
       paths-ignore:
         - '**.md'
         - '.gitignore'
+        - 'CHANGELOG'
   
 permissions:
     contents: read
