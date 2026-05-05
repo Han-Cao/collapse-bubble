@@ -60,6 +60,7 @@ jobs:
           pytest --cov=scripts/ --cov-report=xml -v tests/
     
       - name: Upload coverage
+        if: matrix.python-version == '3.10'
         uses: gaelgirodon/ci-badges-action@v1
         with:
             gist-id: 5baaf521e0e161712d3493546f6a8876
