@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # SV merging for pangenome VCF
-# Last update: 29-Dec-2025
+# Last update: 5-May-2026
 # Author: Han Cao
 # Contributor: Quanyu Chen
 
@@ -789,7 +789,7 @@ def main() -> None:
                               pctseq=args.pctseq,
                               pctsize=args.pctsize,
                               pctovl=args.pctovl,
-                              no_roll=True, # In Truvari 5.3.0, no_roll=True enables rolling...
+                              no_roll=False,       # since Truvari 5.4.0, no_roll=False enables rolling
                               typeignore=False,
                               short_circuit=True,
                               skip_gt=True)
