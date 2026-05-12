@@ -76,6 +76,9 @@ class BubbleClusters:
     def _update_overlap(self) -> None:
         """ Update overlaps after position change """
 
+        # TODO: current bubble overlaps are defined by SV overlapping at the same position
+        # given overlap bubbles should cover TR, this method is good for most cases
+        # however, check overlapping by full span (i.e., start - end for all variants) could be better
         for b1 in self._pos_bubbles:
             for b2 in self._pos_bubbles:
                 if b1 != b2:
@@ -196,8 +199,9 @@ class BubbleClusters:
                     self.cluster[unique_cluster[0]].update(cluster_bubbles)
         
         # test only: check all bubbles have been clustered
-        for b_id in self.bubbles.keys():
-            assert self.bubbles[b_id]['cluster'] is not None
+        if is_debug():
+            for b_id in self.bubbles.keys():
+                assert self.bubbles[b_id]['cluster'] is not None
 
         # clean cluster
         self._clean_clusters()
@@ -470,7 +474,9 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                         match_map.update(chain_match_map)
 
                 # merge and update collapsed SV genotype
-                collapse_var = collapse_genotype([collapse_var, candidate_var], collapse_var, update_info=False)
+                collapse_var = collapse_genotype([collapse_var, candidate_var], 
+                                                 collapse_var, 
+                                                 update_info=False)
 
                 # update SV merging results
                 match_map[candidate_var.id] = match_summary(collapse_var.id, res_match)
@@ -552,14 +558,16 @@ def collapse_vcf(vcf: truvari.VariantFile,
             collapse_chain = {} # chained variants for pass 2
             # pass 1: within bubble collapse
             for b_id, b_vars in working_clusters[cluster_id].items():
-                bubble_clusters.validate_cluster_variants(cluster_id, b_id, b_vars) # test only
+                if is_debug():
+                    bubble_clusters.validate_cluster_variants(cluster_id, b_id, b_vars) # test only
 
                 if b_id == '_MULTI':
                     continue
                 
                 b_remain_vars, b_collapse, b_match, b_conflict = collapse_bubble(b_vars, collapse_chain={})
                 # prepare for pass 2
-                assert set(b_collapse.keys()).isdisjoint(set(collapse_chain.keys())) # test only
+                if is_debug():
+                    assert set(b_collapse.keys()).isdisjoint(set(collapse_chain.keys())) # test only
                 cluster_vars += b_remain_vars
                 collapse_chain.update(b_collapse)
                 cluster_match.update(b_match)
@@ -638,7 +646,9 @@ def update_gt_all(var: pysam.VariantRecord, gt_lst: list[int], phased: bool=True
         hap_idx += ploidy
 
 
-def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord, update_info: bool=True) -> pysam.VariantRecord:
+def collapse_genotype(var_lst: list, 
+                      var_collapse: pysam.VariantRecord, 
+                      update_info: bool=True) -> pysam.VariantRecord:
     """ Merge genotypes from list of SVs """
 
     missing_lst = []
@@ -661,16 +671,16 @@ def collapse_genotype(var_lst: list, var_collapse: pysam.VariantRecord, update_i
     merge_gt = merge_has_var.astype(int)
     merge_gt[merge_missing] = -1
 
-    # test only: 
-    # for one haplotype, maximum one SV
-    if has_var_arr.sum(axis=0).max() > 1:
-        logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
-        raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
+    if is_debug():
+        # test only: for one haplotype, maximum one SV
+        if has_var_arr.sum(axis=0).max() > 1:
+            logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
+            raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
     # TODO: when extending to overlapping bubbles, this may not true, need testing
     if (merge_has_var & merge_missing).any():
         logger.warning(f'{var_collapse.id} has inconsistent genotypes (. vs 1) on the same haplotype after collapsing')
-    
+
     # update genotypes
     update_gt_all(var_collapse, merge_gt)
 
@@ -771,6 +781,12 @@ def setup_logger(log_level) -> None:
     logger.addHandler(handler)
     
     return None
+
+
+def is_debug() -> bool:
+    """ Check if in debug mode """
+
+    return logger.isEnabledFor(logging.DEBUG)
 
 
 def main() -> None:

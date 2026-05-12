@@ -94,7 +94,7 @@ def test_error(error_type: str) -> None:
     command = [SCRIPT, '-i', invcf, '-o',  outvcf]
 
     if error_type == 'right_shift_error':
-        expected_error = 'ValueError: Cannot right shift'
+        expected_error = 'ValueError: Right shift error'
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         subprocess.run(command, check=True, capture_output=True, text=True)

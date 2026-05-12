@@ -154,7 +154,9 @@ class DuplicatesDict:
 
         for var in new_vars:
             self.add_variant(var)
-        assert np.all(self.gt_mat == get_gt_mat(self.var_lst)) # TEST ONLY, should be true
+        
+        if is_debug():
+            assert np.all(self.gt_mat == get_gt_mat(self.var_lst)) # TEST ONLY, should be true
 
         return len(new_vars)
 
@@ -288,6 +290,10 @@ def get_gt_mat(var_lst: list[pysam.VariantRecord]) -> np.ndarray:
 def concat_gt_mat(gt_mat: np.ndarray, mis_as_ref: bool, alt_sum_arr_raw: np.ndarray) -> np.ndarray:
     """ Get concatenated genotypes from a matrix """
 
+    # TODO: for -c repeat, the current alt_sum_arr_raw only include variants of the same repeat motif
+    # maybe considering all variants is better but a lot more complicated
+    # since missing genotype is a very minor case, we do not handle it for now
+
     # all 1 -> 1, any 0 -> 0
     # when include only 1 and -1, check the alt sum of the original gt_mat
     # if additional 1 included -> 0, else -1
@@ -350,7 +356,8 @@ def create_concat_var(var_lst: list[pysam.VariantRecord], gt_lst: list[int],
 def concat_alleles(var_lst: list[pysam.VariantRecord]) -> tuple[str, str]:
     """ Concatenate alleles """
 
-    assert len(var_lst) > 1    # TEST ONLY, should always be true
+    if is_debug():
+        assert len(var_lst) > 1    # TEST ONLY, should always be true
 
     ref, alt = var_lst[0].alleles   # type: ignore
     ref0 = ref[0]
@@ -417,8 +424,9 @@ def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -
             expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
 
     if expect_ref_trim != ref_trim:
-        raise ValueError(f"Cannot right shift {var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]} " +  # type: ignore
-                         f"to the 3' end of ref allele {ref_trim}.")
+        raise ValueError(f"Right shift error at {var_add.chrom}:{var_add.pos}. " +
+                          "Please make sure the input VCF is fully normalized and stable sorted by CHR and POS. " +
+                         f"(Cannot right shift {var_add.ref}_{var_add.alts[0]} to the 3' end of ref allele {ref_trim}.)")
 
 
 def right_shift_indel(seq: str, n: int) -> str:
@@ -660,6 +668,30 @@ def check_vcf(vcf: pysam.VariantFile, n: int) -> None:
                 raise ValueError('Unphased sample is not supported')
 
 
+def setup_logger(log_level) -> None:
+    """ Setup logger """
+    
+    # Clear and setup
+    logger.handlers.clear()
+    logger.setLevel(log_level)
+    
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '[%(asctime)s] - [%(levelname)s]: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return None
+
+
+def is_debug() -> bool:
+    """ Check if in debug mode """
+
+    return logger.isEnabledFor(logging.DEBUG)
+
+
 def main() -> None:
 
     args = parse_args()
@@ -669,9 +701,7 @@ def main() -> None:
         log_level = logging.DEBUG
     else:
         log_level = logging.INFO
-    logging.basicConfig(level=log_level,
-                        format='[%(asctime)s] - [%(levelname)s]: %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S')
+    setup_logger(log_level)
     
     # initialize
     invcf = pysam.VariantFile(args.invcf, 'rb')
