@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 logger.propagate = False
 
 class BubbleClusters:
-    """ Clusters of bubbles overlapping with the same tandem repeat """
+    """ Clusters of overlapping bubbles """
 
     def __init__(self) -> None:
 
         self.bubbles = {} # bubble_id -> {'id': [var_ids], 'svtype': [var_svtypes], 'cluster': cluster_id}
-        self.bubbles_id = [] # list of bubble_ids, this keep the bubble order in the VCF
+        self.bubbles_id = [] # list of bubble_ids, this keeps the bubble order in the VCF
         self.cluster = defaultdict(set) # cluster_id -> set of bubble_ids
         self.cluster_vars = {} # cluster_id -> {'bubble_id': [var_ids], '_MULTI': [var_ids]}
         self.cluster_nvar = {} # cluster_id -> number of variants
@@ -77,7 +77,7 @@ class BubbleClusters:
         """ Update overlaps after position change """
 
         # TODO: current bubble overlaps are defined by SV overlapping at the same position
-        # given overlap bubbles should cover TR, this method is good for most cases
+        # given overlapping bubbles should cover TRs, this method is good for most cases
         # however, check overlapping by full span (i.e., start - end for all variants) could be better
         for b1 in self._pos_bubbles:
             for b2 in self._pos_bubbles:
@@ -118,7 +118,7 @@ class BubbleClusters:
         elif variant.pos < self._pos and variant.chrom == self._chr:
             raise ValueError('Input VCF is not sorted')
 
-        # all variants at the previous position has been processed
+        # all variants at the previous position have been processed
         else:
             # update overlaps 
             self._update_overlap()
@@ -191,7 +191,7 @@ class BubbleClusters:
                 # TODO: this should be useless when using BFS to cluster bubbles, consider removing
                 else:
                     logger.warning(f'Bubble {b_id} is clustered 2 times, this should not happen!')
-                    # already clustered bubbles must in the same cluster
+                    # already clustered bubbles must be in the same cluster
                     logger.debug(f'Assigning {b_id} to existing cluster {unique_cluster}')
                     assert len(unique_cluster) == 1
                     for id in cluster_bubbles:
@@ -223,14 +223,14 @@ class BubbleClusters:
             svtypes = np.array(svtypes)
             # find concat vars by checking duplicates
             uniq_id, uniq_idx, uniq_counts = np.unique(var_ids, return_index=True, return_counts=True)
-            # count svtypes after deduplicate by var_ids
+            # count svtypes after deduplicating by var_ids
             _, sv_counts = np.unique(svtypes[uniq_idx], return_counts=True)
             
             # if only one SV per type, drop
             if sv_counts.max() == 1:
                 drop_clusters.append(c_id)
             # if more than one SV per type, save var_ids for collapsing
-            # Note: in cluster_vars, we separate multi bubble variants
+            # Note: in cluster_vars, we separate multi-bubble variants
             # this allow we can first collapse variants within the same bubble, then across bubbles
             else:
                 self.cluster_nvar[c_id] = len(uniq_id)
@@ -274,7 +274,7 @@ def get_variant_type(variant: pysam.VariantRecord, min_sv_len: int, sv_only: boo
     
 
 def get_bubble_ids(variant: pysam.VariantRecord) -> list[str]:
-    """ Get bubble ID list/ of a variant """
+    """ Get bubble ID list of a variant """
 
     if 'BUBBLE_ID' in variant.info:
         bubble_ids = [variant.info['BUBBLE_ID']]
@@ -337,7 +337,7 @@ def annotate_sv(variant: pysam.VariantRecord, svtype: str) -> pysam.VariantRecor
 
     new_var.info['SVTYPE'] = svtype
     # truvari always use INFO/SVLEN to compare size, so we set it differently:
-    # INS, DEL: len(ref) - len(alt)
+    # INS, DEL: len(alt) - len(ref)
     # INV, COMPLEX: len(ref)
     # this will not affect SVLEN in output VCF
     if svtype == 'COMPLEX' or svtype == 'INV':
@@ -408,7 +408,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
     """ 
     Collapse SVs within the same bubble or cluster, this will be run in 2 passes:
     1. collapse SVs within the same bubble
-    2. collapse SVs within across bubbles within the same cluster
+    2. collapse SVs across bubbles within the same cluster
 
     Input:
     var_lst: list of SVs to be collapsed
@@ -416,7 +416,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
     
     Return:
     keep_vars: list of non-redundant SVs after collapse
-    collapse_dict: dict of collapase id -> [collapsed VariantRecord]
+    collapse_dict: dict of collapse id -> [collapsed VariantRecord]
     match_map: dict of SV matching results
     conflict_map: dict of conflicting SVs {'Variant_ID': 'Collapse_ID'}
 
@@ -449,10 +449,10 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                     conflict_map[candidate_var.id] = collapse_var.id
                     continue
                 
-                # if candidate var is already collased from multiple varinats
+                # if candidate var is already collapsed from multiple variants
                 # check all the chained variants to avoid over-merging
                 # we don't need to check haplotype conflict as they are all merged into candidate_var
-                # TODO: consider add --chain like truvari?
+                # TODO: consider adding --chain like truvari?
                 if candidate_var.id in collapse_chain:
                     flag_chain_break = False
                     chain_match_map = {} # cached match_lst for chained variants
@@ -474,6 +474,7 @@ def collapse_bubble(var_lst: list[truvari.VariantRecord], collapse_chain: dict) 
                         match_map.update(chain_match_map)
 
                 # merge and update collapsed SV genotype
+                # update_info=False ensures representative SV was selected based on the original MAC
                 collapse_var = collapse_genotype([collapse_var, candidate_var], 
                                                  collapse_var, 
                                                  update_info=False)
@@ -592,7 +593,7 @@ def collapse_vcf(vcf: truvari.VariantFile,
             # free memory
             del working_clusters[cluster_id]
     
-    # If everthing works well, all clusters should be removed from working_clusters
+    # If everything works well, all clusters should be removed from working_clusters
     assert len(working_clusters) == 0
 
     # convert to dataframe
@@ -605,7 +606,6 @@ def collapse_vcf(vcf: truvari.VariantFile,
 
     # check Collapse_ID no longer collapse to any other variant
     assert df_collapse['Collapse_ID'].isin(df_collapse['Variant_ID']).sum() == 0
-    # remove duplicated conflict, this is due to 
 
     # create dataframe
     return df_collapse, df_conflict
@@ -677,7 +677,7 @@ def collapse_genotype(var_lst: list,
             logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
             raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
-    # TODO: when extending to overlapping bubbles, this may not true, need testing
+    # TODO: when extending to overlapping bubbles, this may not be true, need testing
     if (merge_has_var & merge_missing).any():
         logger.warning(f'{var_collapse.id} has inconsistent genotypes (. vs 1) on the same haplotype after collapsing')
 
@@ -727,7 +727,7 @@ def write_outvcf(invcf: truvari.VariantFile, outvcf: truvari.VariantFile,
         var_type = get_variant_type(variant, min_len, sv_only=False)
         var_out.info['TYPE'] = var_type
 
-        # nothing to do with SNP
+        # nothing to do for SNP
         if var_type == 'SNP':
             outvcf.write(var_out)
             continue
