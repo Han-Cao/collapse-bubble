@@ -36,7 +36,8 @@ def run_script(vcf_type: str) -> None:
                '-o', outvcf,
                '-m', outmap,
                '-r', '100', '-p', '0.9', '-P', '0.9', '-O', '0.9',
-               '--info', 'SVTYPE,SVLEN']
+               '--info', 'SVTYPE,SVLEN',
+               '--debug']
     
     subprocess.run(command, check=True)
 

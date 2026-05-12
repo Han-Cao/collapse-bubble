@@ -27,7 +27,7 @@ def run_script(vcf_type: str) -> None:
     if os.path.exists(outvcf):
         os.remove(outvcf)
 
-    command = [SCRIPT, '-i', invcf, '-o',  outvcf]
+    command = [SCRIPT, '-i', invcf, '-o',  outvcf, '--debug']
     
     if vcf_type == 'position':
         command += ['-c', 'position','--track', 'AT']
