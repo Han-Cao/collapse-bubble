@@ -1,12 +1,12 @@
 [project]
 name = "collapse-bubble"
-version = "0.1.1"
+version = "0.1.3"
 description = "Pangenome structural variations merging and overlapping variant merging"
 authors = [
     { name = "Han Cao", email = "hcaoad@connect.ust.hk" },
 ]
 dependencies = [
-    "truvari==5.3.0",
+    "truvari==5.4.0",
     "pysam",
     "pandas",
     "numpy"

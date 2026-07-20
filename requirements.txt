@@ -1,4 +1,4 @@
-truvari==5.3.0
+truvari==5.4.0
 pysam
 pandas
 numpy
