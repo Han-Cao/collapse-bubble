@@ -119,7 +119,7 @@ class DuplicatesDict:
             # when there are more than 1 motif in the same position,
             # we need to generate unique no across different motifs
             concat_n = 0
-            for _, concat_var_idx in motif_dict.items():
+            for concat_var_idx in motif_dict.values():
                 if len(concat_var_idx) < 2:
                     continue
                 # here, we pass a copy of gt_mat, so we need to update the gt_mat
@@ -169,7 +169,7 @@ class DuplicatesDict:
                            self.gt_mat[dup_var_idx],
                            mis_as_ref,
                            track)
-            self.update_merging((self.var_lst[dup_var_idx[0]].alleles))
+            self.update_merging(self.var_lst[dup_var_idx[0]].alleles)
             dup_var_idx = get_duplicates(self.dup_dict)
         
         return self.n_merge
@@ -198,7 +198,7 @@ class DuplicatesDict:
 def get_duplicates(dup_dict: dict[str, list]) -> list:
     """ Get the index of first duplicated variants """
 
-    for _, dup_var_idx in dup_dict.items():
+    for dup_var_idx in dup_dict.values():
         if len(dup_var_idx) > 1:
             return dup_var_idx
     
@@ -506,7 +506,7 @@ def update_gt_at(var: pysam.VariantRecord, idx_lst: list[int], hap_indexer: HapI
 
     for i, gt in zip(idx_lst, gt_lst):  
 
-        samp_idx, ploidy, n_hap = hap_indexer[i]
+        samp_idx, _ploidy, n_hap = hap_indexer[i]
         
         old_gt = var.samples[samp_idx]['GT']
         new_gt = list(old_gt)
@@ -651,7 +651,7 @@ def process_dups(outvcf: pysam.VariantFile, var_dict: DuplicatesDict, prev_var: 
     if n_input == 0:
         outvcf.write(prev_var)
         counter.output += 1
-        return None
+        return
 
     # merge if more than 1 varaints at the previous position
     n_concat = var_dict.concatenate(hap_indexer=hap_indexer, 
@@ -710,8 +710,6 @@ def setup_logger(log_level) -> None:
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    
-    return None
 
 
 def is_debug() -> bool:

@@ -5,14 +5,14 @@
 # Author: Han Cao
 # Contributor: Quanyu Chen
 
-import logging
 import argparse
+import logging
 from collections import defaultdict, deque
 
-import pysam
-import truvari
 import numpy as np
 import pandas as pd
+import pysam
+import truvari
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -200,7 +200,7 @@ class BubbleClusters:
         
         # test only: check all bubbles have been clustered
         if is_debug():
-            for b_id in self.bubbles.keys():
+            for b_id in self.bubbles:
                 assert self.bubbles[b_id]['cluster'] is not None
 
         # clean cluster
@@ -585,7 +585,7 @@ def collapse_vcf(vcf: truvari.VariantFile,
             conflict_map.update(c_conflict)
 
             # extract variant annotations and prepare for output
-            for _, b_vars in working_clusters[cluster_id].items():
+            for b_vars in working_clusters[cluster_id].values():
                 for var in b_vars:
                     if var.id in cluster_match:
                         collapse_map_lst.append(get_variant_info(var, cluster_match[var.id], info_lst))
@@ -671,9 +671,8 @@ def collapse_genotype(var_lst: list,
     merge_gt = merge_has_var.astype(int)
     merge_gt[merge_missing] = -1
 
-    if is_debug():
-        # test only: for one haplotype, maximum one SV
-        if has_var_arr.sum(axis=0).max() > 1:
+    # test only: for one haplotype, maximum one SV
+    if is_debug() and has_var_arr.sum(axis=0).max() > 1:
             logger.error(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
             raise ValueError(f'More than 1 SV on the same haplotype, collapse SV ID: {var_collapse.id}')
     # . and 1 should not exist on the same haplotype
@@ -779,8 +778,6 @@ def setup_logger(log_level) -> None:
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    
-    return None
 
 
 def is_debug() -> bool:

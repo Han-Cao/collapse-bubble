@@ -1,8 +1,8 @@
-import pytest
-import subprocess
 import os
- 
+import subprocess
+
 import pysam
+import pytest
 
 # Constants
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
