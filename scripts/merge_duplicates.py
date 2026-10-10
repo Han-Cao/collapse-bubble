@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Merge duplicated variants in phased VCF
-# Last update: 26-Jun-2025
+# Last update: 10-Oct-2026
 # Author: Han Cao
 
 import argparse
@@ -9,9 +9,8 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-import pysam
 import numpy as np
-
+import pysam
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +405,23 @@ def check_replacement(ref: str, alt: str, var_add: pysam.VariantRecord) -> None:
                        f"{var_add.chrom}:{var_add.pos}:{var_add.ref}_{var_add.alts[0]}") # type: ignore
 
 
+def same_seq(seq1: str, seq2: str) -> tuple[bool, bool]:
+    """ Check if 2 sequences are the same, ignoring N bases """
+
+    # fast path if no N in either sequence
+    if seq1 == seq2:
+        return True, False
+    if 'N' not in seq1 and 'N' not in seq2:
+        return False, False
+    # slow path: at least one has N, do N-aware compare
+    if len(seq1) != len(seq2):
+        return False, True
+    for a, b in zip(seq1, seq2):
+        if a != b and a != 'N' and b != 'N':
+            return False, True
+    return True, True
+
+
 def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -> None:
     """ Check if a variant can be correctly concatenated with an INDEL """
     
@@ -413,20 +429,32 @@ def check_indel(ref_trim: str, indel_seq: str, var_add: pysam.VariantRecord, ) -
     indel_len = len(indel_seq)
     ref_trim_len = len(ref_trim)
 
-    if ref_trim_len <= indel_len:
-        expect_ref_trim = indel_seq[0:ref_trim_len]
-    else:
-        n_copy = ref_trim_len // indel_len
-        n_shift = ref_trim_len % indel_len
-        if n_shift == 0:
-            expect_ref_trim = indel_seq * n_copy
-        else:
-            expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
+    # original code to check allele compatibility
+    # this is easier to understand the logic
+    # if ref_trim_len <= indel_len:
+    #     expect_ref_trim = indel_seq[0:ref_trim_len]
+    # else:
+    #     n_copy = ref_trim_len // indel_len
+    #     n_shift = ref_trim_len % indel_len
+    #     if n_shift == 0:
+    #         expect_ref_trim = indel_seq * n_copy
+    #     else:
+    #         expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
 
-    if expect_ref_trim != ref_trim:
+    # this is equivalent to the above code but more concise
+    n_copy = ref_trim_len // indel_len
+    n_shift = ref_trim_len % indel_len
+    expect_ref_trim = indel_seq * n_copy + indel_seq[:n_shift]
+
+    is_same, has_n = same_seq(ref_trim, expect_ref_trim)
+
+    if not is_same:
         raise ValueError(f"Right shift error at {var_add.chrom}:{var_add.pos}. " +
                           "Please make sure the input VCF is fully normalized and stable sorted by CHR and POS. " +
                          f"(Cannot right shift {var_add.ref}_{var_add.alts[0]} to the 3' end of ref allele {ref_trim}.)")
+    if has_n:
+        logger.warning(f"Found N bases in sequence at {var_add.chrom}:{var_add.pos} " +
+                       f"when concating indel {var_add.ref}_{var_add.alts[0]} to the ref allele {ref_trim}.")
 
 
 def right_shift_indel(seq: str, n: int) -> str:
@@ -437,7 +465,7 @@ def right_shift_indel(seq: str, n: int) -> str:
 
 
 def right_trim_alleles(alleles: tuple[str, str]) -> tuple:
-    """ Left-trim same bases """
+    """ Right-trim same bases """
 
     ref_trim = alleles[0]
     alt_trim = alleles[1]

@@ -11,7 +11,7 @@ SCRIPT = os.path.join(TEST_DIR, '..', 'scripts', SCRIPT_NAME)
 INPUT_DIR = os.path.join(TEST_DIR, 'merge_duplicates', 'input')
 TRUTH_DIR = os.path.join(TEST_DIR, 'merge_duplicates', 'truth')
 OUTPUT_DIR = os.path.join(TEST_DIR, 'merge_duplicates', 'output')
-TYPE = ['position', 'mis_as_ref', 'repeat', 'none', 'warning']
+TYPE = ['position', 'position_with_n', 'mis_as_ref', 'repeat', 'none', 'warning']
 ERROR_TYPE = ['right_shift_error']
 
 # Run command
@@ -31,6 +31,8 @@ def run_script(vcf_type: str) -> None:
     
     if vcf_type == 'position':
         command += ['-c', 'position','--track', 'AT']
+    elif vcf_type == 'position_with_n':
+        command += ['-c', 'position','--track', 'AT','--keep-order']
     elif vcf_type == 'mis_as_ref':
         command += ['-c', 'position','--track', 'AT', '--merge-mis-as-ref']
     elif vcf_type == 'repeat':
